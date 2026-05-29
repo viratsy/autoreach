@@ -216,10 +216,13 @@ export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Prop
                   {selectedNumberIds.map((id) => {
                     const cat = tpl.categoryPerNumber?.[id];
                     const available = tpl.availableOn.includes(id);
-                    const paramCount = tpl.paramCountPerNumber?.[id];
-                    const paramMismatch = paramCount !== undefined && paramCount !== tpl.parameterCount;
+                    const paramCount = tpl.paramCountPerNumber?.[id] ?? tpl.parameterCount;
+                    const paramMismatch = tpl.paramCountPerNumber && 
+                      Object.values(tpl.paramCountPerNumber).length > 1 &&
+                      new Set(Object.values(tpl.paramCountPerNumber)).size > 1 &&
+                      available;
                     let badgeClass = "bg-green-100 text-green-700";
-                    let label = `✓ ${paramCount || "?"}p`;
+                    let label = `✓ ${paramCount}p`;
                     if (!available) {
                       badgeClass = "bg-red-100 text-red-700";
                       label = "✗";
