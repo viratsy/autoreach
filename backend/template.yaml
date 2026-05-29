@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: AutoReach - WhatsApp Campaign Scheduler Backend
+Description: AutoReach - WhatsApp Campaign Scheduler Backend v2
 
 Globals:
   Function:
@@ -182,11 +182,6 @@ Resources:
             MaxAge: 300
 
   # --- IAM Role for EventBridge Scheduler ---
-  SchedulerGroup:
-    Type: AWS::Scheduler::ScheduleGroup
-    Properties:
-      Name: !Sub "autoreach-${EnvName}"
-
   SchedulerRole:
     Type: AWS::IAM::Role
     Properties:
