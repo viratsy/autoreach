@@ -170,6 +170,16 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub "autoreach-csv-${EnvName}-${AWS::AccountId}"
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ["*"]
+            AllowedMethods: [GET, PUT]
+            AllowedOrigins:
+              - "https://autoreach.hardikraja.com"
+              - "https://autoreach.navinparmar.in"
+              - "http://localhost:3000"
+            ExposedHeaders: [ETag]
+            MaxAge: 300
 
   # --- Lambda Functions ---
   RequestOTPFunction:
