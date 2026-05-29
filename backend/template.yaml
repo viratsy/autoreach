@@ -177,8 +177,15 @@ Resources:
     Properties:
       Handler: dist/handlers/auth/request-otp.handler
       Policies:
-        - SESCrudPolicy:
-            IdentityName: !Ref SesFromEmail
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OTPTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: "*"
       Events:
         Api:
           Type: Api
@@ -190,6 +197,9 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: dist/handlers/auth/verify-otp.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OTPTable
       Events:
         Api:
           Type: Api
@@ -201,6 +211,9 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: dist/handlers/businesses/list.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
       Events:
         Api:
           Type: Api
@@ -212,6 +225,9 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: dist/handlers/campaigns/create.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
       Events:
         Api:
           Type: Api
@@ -228,11 +244,18 @@ Resources:
       Policies:
         - S3ReadPolicy:
             BucketName: !Ref CSVBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
 
   MetaWebhookFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: dist/handlers/webhooks/meta-status.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
       Events:
         WebhookGet:
           Type: Api
