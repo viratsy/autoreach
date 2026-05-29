@@ -182,6 +182,11 @@ Resources:
             MaxAge: 300
 
   # --- IAM Role for EventBridge Scheduler ---
+  SchedulerGroup:
+    Type: AWS::Scheduler::ScheduleGroup
+    Properties:
+      Name: !Sub "autoreach-${EnvName}"
+
   SchedulerRole:
     Type: AWS::IAM::Role
     Properties:
@@ -264,7 +269,9 @@ Resources:
             - Effect: Allow
               Action:
                 - scheduler:CreateSchedule
-              Resource: "*"
+                - scheduler:DeleteSchedule
+              Resource:
+                - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/autoreach-${EnvName}/*"
             - Effect: Allow
               Action:
                 - iam:PassRole
@@ -273,6 +280,7 @@ Resources:
         Variables:
           SEND_FUNCTION_ARN: !GetAtt SendCampaignFunction.Arn
           SCHEDULER_ROLE_ARN: !GetAtt SchedulerRole.Arn
+          SCHEDULER_GROUP: !Sub "autoreach-${EnvName}"
       Events:
         Api:
           Type: Api

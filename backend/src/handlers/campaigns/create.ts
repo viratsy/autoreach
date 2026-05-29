@@ -9,6 +9,7 @@ import { CampaignRecord } from "../../lib/types";
 const scheduler = new SchedulerClient({});
 const SEND_FUNCTION_ARN = process.env.SEND_FUNCTION_ARN!;
 const SCHEDULER_ROLE_ARN = process.env.SCHEDULER_ROLE_ARN!;
+const SCHEDULER_GROUP = process.env.SCHEDULER_GROUP || "default";
 
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
@@ -76,6 +77,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       await scheduler.send(
         new CreateScheduleCommand({
           Name: `autoreach-${campaignId}`,
+          GroupName: SCHEDULER_GROUP,
           ScheduleExpression: scheduleExpression,
           ScheduleExpressionTimezone: "UTC",
           FlexibleTimeWindow: { Mode: "OFF" },
