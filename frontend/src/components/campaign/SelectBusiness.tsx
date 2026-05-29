@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Business } from "@/types";
 import { CampaignDraft } from "@/app/campaigns/new/page";
+import { apiRequest } from "@/lib/api";
 
 interface Props {
   draft: CampaignDraft;
@@ -9,34 +11,17 @@ interface Props {
   onNext: () => void;
 }
 
-// Mock data — replace with API call
-const mockBusinesses: Business[] = [
-  {
-    businessId: "biz_001",
-    businessName: "Business 1",
-    wabaId: "waba_001",
-    phoneNumbers: [
-      { phoneNumberId: "pn_a", displayNumber: "+91 98765 43210", displayName: "Number A" },
-      { phoneNumberId: "pn_b", displayNumber: "+91 98765 43211", displayName: "Number B" },
-      { phoneNumberId: "pn_c", displayNumber: "+91 98765 43212", displayName: "Number C" },
-    ],
-    createdAt: "",
-    updatedAt: "",
-  },
-  {
-    businessId: "biz_002",
-    businessName: "Business 2",
-    wabaId: "waba_002",
-    phoneNumbers: [
-      { phoneNumberId: "pn_d", displayNumber: "+91 98765 43213", displayName: "Number D" },
-      { phoneNumberId: "pn_e", displayNumber: "+91 98765 43214", displayName: "Number E" },
-    ],
-    createdAt: "",
-    updatedAt: "",
-  },
-];
-
 export default function SelectBusiness({ draft, onUpdate, onNext }: Props) {
+  const [businesses, setBusinesses] = useState<Business[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiRequest<{ businesses: Business[] }>("/businesses")
+      .then((data) => setBusinesses(data.businesses))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
   const handleSelect = (business: Business) => {
     onUpdate({ business, selectedNumbers: [] });
   };
@@ -44,24 +29,30 @@ export default function SelectBusiness({ draft, onUpdate, onNext }: Props) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6">
       <h3 className="text-lg font-semibold text-gray-900 mb-4">Select Business</h3>
-      <div className="space-y-3">
-        {mockBusinesses.map((biz) => (
-          <button
-            key={biz.businessId}
-            onClick={() => handleSelect(biz)}
-            className={`w-full text-left p-4 rounded-lg border transition-colors ${
-              draft.business?.businessId === biz.businessId
-                ? "border-primary-500 bg-primary-50"
-                : "border-gray-200 hover:border-gray-300"
-            }`}
-          >
-            <p className="font-medium text-gray-900">{biz.businessName}</p>
-            <p className="text-sm text-gray-500 mt-1">
-              {biz.phoneNumbers.length} phone number{biz.phoneNumbers.length !== 1 ? "s" : ""}
-            </p>
-          </button>
-        ))}
-      </div>
+      {loading ? (
+        <p className="text-gray-500 text-sm">Loading businesses...</p>
+      ) : businesses.length === 0 ? (
+        <p className="text-gray-500 text-sm">No businesses configured.</p>
+      ) : (
+        <div className="space-y-3">
+          {businesses.map((biz) => (
+            <button
+              key={biz.businessId}
+              onClick={() => handleSelect(biz)}
+              className={`w-full text-left p-4 rounded-lg border transition-colors ${
+                draft.business?.businessId === biz.businessId
+                  ? "border-primary-500 bg-primary-50"
+                  : "border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              <p className="font-medium text-gray-900">{biz.businessName}</p>
+              <p className="text-sm text-gray-500 mt-1">
+                {biz.phoneNumbers.length} phone number{biz.phoneNumbers.length !== 1 ? "s" : ""}
+              </p>
+            </button>
+          ))}
+        </div>
+      )}
       <div className="mt-6 flex justify-end">
         <button
           onClick={onNext}

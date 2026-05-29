@@ -31,6 +31,21 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     // Update status to running
     await updateCampaignStatus(campaignId, "running");
 
+    // Fetch business record for tokens
+    const bizResult = await docClient.send(
+      new GetCommand({
+        TableName: TABLES.BUSINESSES,
+        Key: { PK: `BIZ#${campaign.businessId}`, SK: "METADATA" },
+      })
+    );
+    const business = bizResult.Item;
+    const tokenMap: Record<string, string> = {};
+    if (business?.phoneNumbers) {
+      for (const pn of business.phoneNumbers) {
+        tokenMap[pn.phoneNumberId] = pn.accessToken;
+      }
+    }
+
     // Fetch CSV from S3
     const contacts = await fetchCSVFromS3(campaign.csvS3Key);
 
@@ -46,7 +61,8 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         const metaMessageId = await sendWhatsAppMessage(
           campaign,
           contact,
-          assignedNumber.phoneNumberId
+          assignedNumber.phoneNumberId,
+          tokenMap[assignedNumber.phoneNumberId] || process.env.META_ACCESS_TOKEN || ""
         );
 
         // Store message record
@@ -131,7 +147,8 @@ async function fetchCSVFromS3(s3Key: string): Promise<CSVContact[]> {
 async function sendWhatsAppMessage(
   campaign: CampaignRecord,
   contact: CSVContact,
-  phoneNumberId: string
+  phoneNumberId: string,
+  accessToken: string
 ): Promise<string> {
   // Build template parameters from mapping
   const parameters = Object.entries(campaign.parameterMapping)
@@ -144,8 +161,6 @@ async function sendWhatsAppMessage(
   // Get the template name for this number (may be mapped differently)
   const templateName =
     campaign.templateMappings[phoneNumberId] || campaign.templateName;
-
-  const accessToken = process.env[`TOKEN_${phoneNumberId}`] || process.env.META_ACCESS_TOKEN;
 
   const response = await fetch(
     `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
