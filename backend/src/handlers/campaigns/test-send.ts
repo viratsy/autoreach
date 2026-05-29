@@ -44,11 +44,6 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     for (const number of selectedNumbers) {
       const tplName = templateMappings?.[number.phoneNumberId] || templateName;
 
-      // Build parameters array
-      const parameters = Object.entries(parameterValues as Record<string, string>)
-        .sort(([a], [b]) => Number(a) - Number(b))
-        .map(([, value]) => ({ type: "text", text: value }));
-
       try {
         const response = await fetch(
           `https://graph.facebook.com/v18.0/${number.phoneNumberId}/messages`,
@@ -65,12 +60,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
               template: {
                 name: tplName,
                 language: { code: "en" },
-                components: [
-                  {
-                    type: "body",
-                    parameters,
-                  },
-                ],
+                components: buildTemplateComponents(parameterValues),
               },
             }),
           }
@@ -109,3 +99,44 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     return error(500, "Test send failed", origin);
   }
 };
+
+/**
+ * Build template components array for Meta API.
+ * Non-URL values go as body parameters.
+ * URL values go as button parameters (CTA buttons).
+ */
+function buildTemplateComponents(parameterValues: Record<string, string>) {
+  const sortedEntries = Object.entries(parameterValues)
+    .sort(([a], [b]) => Number(a) - Number(b));
+
+  const components: unknown[] = [];
+
+  // Separate body params (non-URL) and button params (URLs)
+  const bodyValues = sortedEntries
+    .filter(([, v]) => !v.startsWith("http://") && !v.startsWith("https://"))
+    .map(([, value]) => ({ type: "text", text: value }));
+
+  const urlValues = sortedEntries
+    .filter(([, v]) => v.startsWith("http://") || v.startsWith("https://"))
+    .map(([, value]) => value);
+
+  // Add body parameters
+  if (bodyValues.length > 0) {
+    components.push({
+      type: "body",
+      parameters: bodyValues,
+    });
+  }
+
+  // Add button parameters for URL buttons
+  urlValues.forEach((url, index) => {
+    components.push({
+      type: "button",
+      sub_type: "url",
+      index: index,
+      parameters: [{ type: "text", text: url }],
+    });
+  });
+
+  return components;
+}
