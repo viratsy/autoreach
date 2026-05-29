@@ -19,6 +19,7 @@ interface TemplateInfo {
   components: { type: string; text?: string }[];
   availableOn: string[];
   categoryPerNumber?: Record<string, string>;
+  paramCountPerNumber?: Record<string, number>;
 }
 
 export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Props) {
@@ -77,7 +78,15 @@ export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Prop
       (id) => tpl.categoryPerNumber?.[id] === "MARKETING"
     );
 
-    setMismatchNumbers(mismatches);
+    // Check param count mismatches (different template version)
+    const paramMismatches = selectedNumberIds.filter(
+      (id) => tpl.availableOn.includes(id) &&
+              tpl.paramCountPerNumber?.[id] !== undefined &&
+              tpl.paramCountPerNumber[id] !== tpl.parameterCount &&
+              tpl.categoryPerNumber?.[id] !== "MARKETING"
+    );
+
+    setMismatchNumbers([...mismatches, ...paramMismatches]);
     setMarketingNumbers(marketing);
     setSkippedNumbers([]);
 
@@ -198,20 +207,28 @@ export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Prop
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
                   {tpl.parameterCount} parameters • Available on {tpl.availableOn.length}/{selectedNumberIds.length} numbers
+                  {tpl.paramCountPerNumber && Object.values(tpl.paramCountPerNumber).some(c => c !== tpl.parameterCount) && (
+                    <span className="text-orange-600 ml-1">⚠ param count differs across numbers</span>
+                  )}
                 </p>
                 {/* Per-number badges */}
                 <div className="flex flex-wrap gap-1 mt-2">
                   {selectedNumberIds.map((id) => {
                     const cat = tpl.categoryPerNumber?.[id];
                     const available = tpl.availableOn.includes(id);
+                    const paramCount = tpl.paramCountPerNumber?.[id];
+                    const paramMismatch = paramCount !== undefined && paramCount !== tpl.parameterCount;
                     let badgeClass = "bg-green-100 text-green-700";
-                    let label = "✓";
+                    let label = `✓ ${paramCount || "?"}p`;
                     if (!available) {
                       badgeClass = "bg-red-100 text-red-700";
                       label = "✗";
                     } else if (cat === "MARKETING") {
                       badgeClass = "bg-orange-100 text-orange-700";
-                      label = "⚠ MKT";
+                      label = `⚠ MKT ${paramCount}p`;
+                    } else if (paramMismatch) {
+                      badgeClass = "bg-orange-100 text-orange-700";
+                      label = `⚠ ${paramCount}p`;
                     }
                     return (
                       <span key={id} className={`text-xs px-1.5 py-0.5 rounded ${badgeClass}`}>

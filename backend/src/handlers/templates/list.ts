@@ -31,7 +31,6 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
     const items = result.Items || [];
 
-    // Group by template name, show which numbers have it
     const templateMap: Record<string, {
       templateName: string;
       category: string;
@@ -39,6 +38,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       components: unknown[];
       availableOn: string[];
       categoryPerNumber: Record<string, string>;
+      paramCountPerNumber: Record<string, number>;
     }> = {};
 
     for (const item of items) {
@@ -60,10 +60,12 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           components: item.components,
           availableOn: [],
           categoryPerNumber: {},
+          paramCountPerNumber: {},
         };
       }
       templateMap[templateName].availableOn.push(phoneNumberId);
       templateMap[templateName].categoryPerNumber[phoneNumberId] = item.category;
+      templateMap[templateName].paramCountPerNumber[phoneNumberId] = item.parameterCount;
 
       // If any number has MARKETING, mark overall as MARKETING
       if (item.category === "MARKETING") {
