@@ -17,6 +17,16 @@ export default function ReviewSchedule({ draft, onUpdate, onBack }: Props) {
   const [error, setError] = useState("");
 
   const handleSchedule = async () => {
+    // Validate schedule is at least 5 minutes in the future
+    const now = new Date();
+    const scheduled = new Date(`${draft.scheduleDate}T${draft.scheduleTime}:00`);
+    const minTime = new Date(now.getTime() + 5 * 60 * 1000);
+
+    if (scheduled < minTime) {
+      setError("Schedule must be at least 5 minutes from now");
+      return;
+    }
+
     setScheduling(true);
     setError("");
 

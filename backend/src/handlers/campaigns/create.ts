@@ -1,9 +1,14 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
+import { SchedulerClient, CreateScheduleCommand } from "@aws-sdk/client-scheduler";
 import { docClient, TABLES } from "../../lib/dynamo";
 import { generateCampaignId } from "../../lib/campaign-id";
 import { success, error, options } from "../../lib/response";
 import { CampaignRecord } from "../../lib/types";
+
+const scheduler = new SchedulerClient({});
+const SEND_FUNCTION_ARN = process.env.SEND_FUNCTION_ARN!;
+const SCHEDULER_ROLE_ARN = process.env.SCHEDULER_ROLE_ARN!;
 
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
@@ -61,6 +66,28 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     await docClient.send(
       new PutCommand({ TableName: TABLES.CAMPAIGNS, Item: record })
     );
+
+    // Create EventBridge Schedule if scheduled
+    if (status === "scheduled" && scheduleDate && scheduleTime) {
+      // Convert IST to UTC for EventBridge (IST = UTC+5:30)
+      const istDateTime = new Date(`${scheduleDate}T${scheduleTime}:00+05:30`);
+      const scheduleExpression = `at(${istDateTime.toISOString().replace('.000Z', '')})`;
+
+      await scheduler.send(
+        new CreateScheduleCommand({
+          Name: `autoreach-${campaignId}`,
+          ScheduleExpression: scheduleExpression,
+          ScheduleExpressionTimezone: "UTC",
+          FlexibleTimeWindow: { Mode: "OFF" },
+          Target: {
+            Arn: SEND_FUNCTION_ARN,
+            RoleArn: SCHEDULER_ROLE_ARN,
+            Input: JSON.stringify({ campaignId }),
+          },
+          ActionAfterCompletion: "DELETE",
+        })
+      );
+    }
 
     return success({ campaignId, campaignName: record.campaignName }, origin);
   } catch (err) {
