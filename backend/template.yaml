@@ -1,0 +1,197 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: AutoReach - WhatsApp Campaign Scheduler Backend
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        BUSINESSES_TABLE: !Ref BusinessesTable
+        CAMPAIGNS_TABLE: !Ref CampaignsTable
+        MESSAGES_TABLE: !Ref MessagesTable
+        TEMPLATES_TABLE: !Ref TemplatesTable
+        CSV_BUCKET: !Ref CSVBucket
+        META_ACCESS_TOKEN: !Ref MetaAccessToken
+        WEBHOOK_VERIFY_TOKEN: !Ref WebhookVerifyToken
+
+Parameters:
+  MetaAccessToken:
+    Type: String
+    NoEcho: true
+  WebhookVerifyToken:
+    Type: String
+    NoEcho: true
+  EnvName:
+    Type: String
+    Default: "dev"
+    Description: "Environment name (hardik/navin)"
+
+Resources:
+  # --- DynamoDB Tables ---
+  BusinessesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: autoreach-businesses
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
+  CampaignsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: autoreach-campaigns
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI2
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  MessagesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: autoreach-messages
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  TemplatesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: autoreach-templates
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
+  # --- S3 ---
+  CSVBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "autoreach-csv-${EnvName}-${AWS::AccountId}"
+
+  # --- Lambda Functions ---
+  ListBusinessesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/businesses/list.handler
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /businesses
+            Method: GET
+
+  CreateCampaignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/create.handler
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns
+            Method: POST
+
+  SendCampaignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/send.handler
+      Timeout: 900
+      MemorySize: 512
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref CSVBucket
+
+  MetaWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/webhooks/meta-status.handler
+      Events:
+        WebhookGet:
+          Type: Api
+          Properties:
+            Path: /webhooks/meta
+            Method: GET
+        WebhookPost:
+          Type: Api
+          Properties:
+            Path: /webhooks/meta
+            Method: POST
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway URL
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+  WebhookUrl:
+    Description: Meta Webhook URL
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/webhooks/meta"

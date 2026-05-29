@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+frontend/.next/
+backend/dist/
+.aws-sam/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# SAM
+samconfig.toml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
