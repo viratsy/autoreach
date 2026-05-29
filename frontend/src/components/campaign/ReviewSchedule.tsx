@@ -1,6 +1,9 @@
 "use client";
 
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { CampaignDraft } from "@/app/campaigns/new/page";
+import { apiRequest } from "@/lib/api";
 
 interface Props {
   draft: CampaignDraft;
@@ -9,9 +12,42 @@ interface Props {
 }
 
 export default function ReviewSchedule({ draft, onUpdate, onBack }: Props) {
+  const router = useRouter();
+  const [scheduling, setScheduling] = useState(false);
+  const [error, setError] = useState("");
+
   const handleSchedule = async () => {
-    // TODO: Upload CSV to S3, then call create campaign API
-    alert(`Campaign "${draft.campaignPrefix}" scheduled!`);
+    setScheduling(true);
+    setError("");
+
+    try {
+      const result = await apiRequest<{ campaignId: string; campaignName: string }>(
+        "/campaigns",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            campaignPrefix: draft.campaignPrefix,
+            businessId: draft.business!.businessId,
+            businessName: draft.business!.businessName,
+            selectedNumbers: draft.selectedNumbers,
+            templateName: draft.template!.templateName,
+            templateMappings: draft.templateMappings,
+            parameterMapping: draft.parameterMapping,
+            csvS3Key: draft.csvS3Key,
+            totalContacts: draft.csvRowCount,
+            scheduleDate: draft.scheduleDate,
+            scheduleTime: draft.scheduleTime,
+          }),
+        }
+      );
+
+      // Redirect to campaigns list with success
+      router.push("/campaigns");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to schedule campaign");
+    } finally {
+      setScheduling(false);
+    }
   };
 
   return (
@@ -81,16 +117,22 @@ export default function ReviewSchedule({ draft, onUpdate, onBack }: Props) {
         </div>
       </div>
 
+      {error && (
+        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm text-red-700">{error}</p>
+        </div>
+      )}
+
       <div className="mt-6 flex justify-between">
         <button onClick={onBack} className="px-4 py-2 text-gray-600 text-sm font-medium hover:text-gray-900">
           Back
         </button>
         <button
           onClick={handleSchedule}
-          disabled={!draft.campaignPrefix || !draft.scheduleDate || !draft.scheduleTime}
+          disabled={!draft.campaignPrefix || !draft.scheduleDate || !draft.scheduleTime || scheduling}
           className="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary-700 transition-colors"
         >
-          Schedule Campaign
+          {scheduling ? "Scheduling..." : "Schedule Campaign"}
         </button>
       </div>
     </div>

@@ -30,6 +30,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     }
 
     const campaignId = generateCampaignId(campaignPrefix);
+    const status = scheduleDate && scheduleTime ? "scheduled" : "draft";
     const now = new Date().toISOString();
 
     const record: CampaignRecord = {
@@ -37,7 +38,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       SK: "METADATA",
       GSI1PK: `BIZ#${businessId}`,
       GSI1SK: now,
-      GSI2PK: "STATUS#draft",
+      GSI2PK: `STATUS#${status}`,
       GSI2SK: `${scheduleDate}#${scheduleTime}`,
       campaignId,
       campaignName: `${campaignPrefix}_${campaignId.split("_").pop()}`,
@@ -51,7 +52,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       totalContacts: totalContacts || 0,
       scheduleDate: scheduleDate || "",
       scheduleTime: scheduleTime || "",
-      status: "draft",
+      status,
       createdBy: event.requestContext.authorizer?.claims?.sub || "system",
       createdAt: now,
       updatedAt: now,
