@@ -38,7 +38,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     if (!business) return error(404, "Business not found", origin);
 
     const accessToken = business.accessToken;
-    const results: { phoneNumberId: string; displayName: string; status: string; error?: string }[] = [];
+    const results: { phoneNumberId: string; displayName: string; status: string; error?: string; messageId?: string }[] = [];
 
     // Send test from each selected number
     for (const number of selectedNumbers) {
@@ -76,20 +76,21 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           }
         );
 
-        const data = (await response.json()) as { messages?: { id: string }[]; error?: { message: string } };
+        const data = (await response.json()) as { messages?: { id: string; message_status?: string }[]; error?: { message: string; code?: number } };
 
         if (response.ok && data.messages?.[0]) {
           results.push({
             phoneNumberId: number.phoneNumberId,
             displayName: number.displayName,
             status: "sent",
+            messageId: data.messages[0].id,
           });
         } else {
           results.push({
             phoneNumberId: number.phoneNumberId,
             displayName: number.displayName,
             status: "failed",
-            error: data.error?.message || "Unknown error",
+            error: data.error?.message || `HTTP ${response.status}`,
           });
         }
       } catch (err) {

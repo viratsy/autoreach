@@ -16,6 +16,7 @@ interface TestResult {
   displayName: string;
   status: string;
   error?: string;
+  messageId?: string;
 }
 
 export default function TestMessage({ draft, onNext, onBack }: Props) {
@@ -136,22 +137,37 @@ export default function TestMessage({ draft, onNext, onBack }: Props) {
       {results.length > 0 && (
         <div className="mt-5 space-y-2">
           <p className="text-sm font-medium text-gray-700">Results:</p>
-          {results.map((r, i) => (
-            <div
-              key={i}
-              className={`flex items-center gap-2 p-3 rounded-lg text-sm ${
-                r.status === "sent" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
-              }`}
-            >
-              {r.status === "sent" ? (
-                <CheckCircle className="w-4 h-4" />
-              ) : (
-                <XCircle className="w-4 h-4" />
-              )}
-              <span className="font-medium">{r.displayName}</span>
-              <span>— {r.status === "sent" ? "Sent successfully" : r.error}</span>
-            </div>
-          ))}
+          {results.map((r, i) => {
+            const number = draft.selectedNumbers.find((n) => n.phoneNumberId === r.phoneNumberId);
+            return (
+              <div
+                key={i}
+                className={`p-3 rounded-lg text-sm ${
+                  r.status === "sent" ? "bg-green-50" : "bg-red-50"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  {r.status === "sent" ? (
+                    <CheckCircle className="w-4 h-4 text-green-600" />
+                  ) : (
+                    <XCircle className="w-4 h-4 text-red-600" />
+                  )}
+                  <span className="font-medium text-gray-900">{r.displayName}</span>
+                  <span className="text-gray-400">•</span>
+                  <span className="text-xs text-gray-500">{number?.displayNumber}</span>
+                </div>
+                <div className="ml-6 mt-1">
+                  {r.status === "sent" ? (
+                    <p className="text-xs text-green-700">
+                      Accepted by Meta • ID: {r.messageId?.slice(0, 20)}...
+                    </p>
+                  ) : (
+                    <p className="text-xs text-red-700">{r.error}</p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
