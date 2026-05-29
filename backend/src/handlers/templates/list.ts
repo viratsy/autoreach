@@ -38,6 +38,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       parameterCount: number;
       components: unknown[];
       availableOn: string[];
+      categoryPerNumber: Record<string, string>;
     }> = {};
 
     for (const item of items) {
@@ -58,9 +59,16 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           parameterCount: item.parameterCount,
           components: item.components,
           availableOn: [],
+          categoryPerNumber: {},
         };
       }
       templateMap[templateName].availableOn.push(phoneNumberId);
+      templateMap[templateName].categoryPerNumber[phoneNumberId] = item.category;
+
+      // If any number has MARKETING, mark overall as MARKETING
+      if (item.category === "MARKETING") {
+        templateMap[templateName].category = "MARKETING";
+      }
     }
 
     const templates = Object.values(templateMap);
