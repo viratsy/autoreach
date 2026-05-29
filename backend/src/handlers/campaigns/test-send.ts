@@ -102,41 +102,17 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
 /**
  * Build template components array for Meta API.
- * Non-URL values go as body parameters.
- * URL values go as button parameters (CTA buttons).
+ * All parameters go as body parameters.
  */
 function buildTemplateComponents(parameterValues: Record<string, string>) {
-  const sortedEntries = Object.entries(parameterValues)
-    .sort(([a], [b]) => Number(a) - Number(b));
-
-  const components: unknown[] = [];
-
-  // Separate body params (non-URL) and button params (URLs)
-  const bodyValues = sortedEntries
-    .filter(([, v]) => !v.startsWith("http://") && !v.startsWith("https://"))
+  const bodyParams = Object.entries(parameterValues)
+    .sort(([a], [b]) => Number(a) - Number(b))
     .map(([, value]) => ({ type: "text", text: value }));
 
-  const urlValues = sortedEntries
-    .filter(([, v]) => v.startsWith("http://") || v.startsWith("https://"))
-    .map(([, value]) => value);
-
-  // Add body parameters
-  if (bodyValues.length > 0) {
-    components.push({
+  return [
+    {
       type: "body",
-      parameters: bodyValues,
-    });
-  }
-
-  // Add button parameters for URL buttons
-  urlValues.forEach((url, index) => {
-    components.push({
-      type: "button",
-      sub_type: "url",
-      index: index,
-      parameters: [{ type: "text", text: url }],
-    });
-  });
-
-  return components;
+      parameters: bodyParams,
+    },
+  ];
 }
