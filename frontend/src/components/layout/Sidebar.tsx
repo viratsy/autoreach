@@ -12,9 +12,9 @@ import { logout, getCurrentEmail } from "@/lib/api";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/campaigns", label: "Campaigns", icon: Send },
-  { href: "/campaigns/new", label: "New Campaign", icon: PlusCircle },
-  { href: "/businesses", label: "Businesses", icon: Building2 },
+  { href: "/campaigns/", label: "Campaigns", icon: Send },
+  { href: "/campaigns/new/", label: "New Campaign", icon: PlusCircle },
+  { href: "/businesses/", label: "Businesses", icon: Building2 },
 ];
 
 export default function Sidebar() {

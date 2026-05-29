@@ -1,4 +1,4 @@
-import { nanoid } from "nanoid";
+import { randomBytes } from "crypto";
 
 /**
  * Generate a campaign ID from user prefix + unique suffix.
@@ -11,6 +11,6 @@ export function generateCampaignId(prefix: string): string {
     .replace(/_+/g, "_")
     .replace(/^_|_$/g, "");
 
-  const suffix = nanoid(6);
+  const suffix = randomBytes(4).toString("hex").slice(0, 6);
   return `${sanitized}_${suffix}`;
 }
