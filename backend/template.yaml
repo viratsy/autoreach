@@ -316,6 +316,34 @@ Resources:
             Path: /campaigns/upload-url
             Method: POST
 
+  ListFilesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/list-files.handler
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref CSVBucket
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/files
+            Method: GET
+
+  FilePreviewFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/file-preview.handler
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref CSVBucket
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/file-preview
+            Method: GET
+
   TestSendFunction:
     Type: AWS::Serverless::Function
     Properties:
