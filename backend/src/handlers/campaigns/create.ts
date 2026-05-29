@@ -2,10 +2,13 @@ import { APIGatewayProxyHandler } from "aws-lambda";
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, TABLES } from "../../lib/dynamo";
 import { generateCampaignId } from "../../lib/campaign-id";
-import { success, error } from "../../lib/response";
+import { success, error, options } from "../../lib/response";
 import { CampaignRecord } from "../../lib/types";
 
 export const handler: APIGatewayProxyHandler = async (event) => {
+  const origin = event.headers?.origin || event.headers?.Origin;
+  if (event.httpMethod === "OPTIONS") return options(origin);
+
   try {
     const body = JSON.parse(event.body || "{}");
     const {
@@ -23,7 +26,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     } = body;
 
     if (!campaignPrefix || !businessId || !selectedNumbers?.length) {
-      return error(400, "Missing required fields");
+      return error(400, "Missing required fields", origin);
     }
 
     const campaignId = generateCampaignId(campaignPrefix);
@@ -58,9 +61,9 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       new PutCommand({ TableName: TABLES.CAMPAIGNS, Item: record })
     );
 
-    return success({ campaignId, campaignName: record.campaignName });
+    return success({ campaignId, campaignName: record.campaignName }, origin);
   } catch (err) {
     console.error("Error creating campaign:", err);
-    return error(500, "Failed to create campaign");
+    return error(500, "Failed to create campaign", origin);
   }
 };

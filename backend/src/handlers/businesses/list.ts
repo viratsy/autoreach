@@ -1,9 +1,12 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
 import { ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, TABLES } from "../../lib/dynamo";
-import { success, error } from "../../lib/response";
+import { success, error, options } from "../../lib/response";
 
-export const handler: APIGatewayProxyHandler = async () => {
+export const handler: APIGatewayProxyHandler = async (event) => {
+  const origin = event.headers?.origin || event.headers?.Origin;
+  if (event.httpMethod === "OPTIONS") return options(origin);
+
   try {
     const result = await docClient.send(
       new ScanCommand({ TableName: TABLES.BUSINESSES })
@@ -17,9 +20,9 @@ export const handler: APIGatewayProxyHandler = async () => {
       createdAt: item.createdAt,
     }));
 
-    return success({ businesses });
+    return success({ businesses }, origin);
   } catch (err) {
     console.error("Error listing businesses:", err);
-    return error(500, "Failed to list businesses");
+    return error(500, "Failed to list businesses", origin);
   }
 };

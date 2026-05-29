@@ -19,6 +19,12 @@ Globals:
         SES_FROM_EMAIL: !Ref SesFromEmail
         OTP_TABLE: !Ref OTPTable
         JWT_SECRET: !Ref WebhookVerifyToken
+  Api:
+    Cors:
+      AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+      AllowHeaders: "'Content-Type,Authorization'"
+      AllowOrigin: "'https://autoreach.hardikraja.com'"
+      AllowCredentials: true
 
 Parameters:
   MetaAccessToken:
