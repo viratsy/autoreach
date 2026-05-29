@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
@@ -30,9 +29,9 @@ export default function Sidebar() {
       </div>
       <nav className="flex-1 p-4 space-y-1">
         {navItems.map((item) => {
-          const isActive = pathname === item.href;
+          const isActive = pathname === item.href || pathname === item.href + "/";
           return (
-            <Link
+            <a
               key={item.href}
               href={item.href}
               className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
@@ -43,7 +42,7 @@ export default function Sidebar() {
             >
               <item.icon className="w-5 h-5" />
               {item.label}
-            </Link>
+            </a>
           );
         })}
       </nav>
