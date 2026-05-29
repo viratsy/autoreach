@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import Sidebar from "@/components/layout/Sidebar";
+import AuthGuard from "@/components/layout/AuthGuard";
 import { Campaign, CampaignStatus } from "@/types";
 import { apiRequest } from "@/lib/api";
 import { PlusCircle } from "lucide-react";
@@ -43,10 +44,11 @@ export default function CampaignsPage() {
     : campaigns.filter((c) => c.status === filter);
 
   return (
-    <div className="flex h-screen">
-      <Sidebar />
-      <main className="flex-1 overflow-y-auto p-6">
-        <div className="flex items-center justify-between mb-6">
+    <AuthGuard>
+      <div className="flex h-screen">
+        <Sidebar />
+        <main className="flex-1 overflow-y-auto p-6">
+          <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-gray-900">Campaigns</h2>
           <Link
             href="/campaigns/new"
@@ -140,5 +142,6 @@ export default function CampaignsPage() {
         )}
       </main>
     </div>
+    </AuthGuard>
   );
 }

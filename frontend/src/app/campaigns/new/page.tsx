@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Sidebar from "@/components/layout/Sidebar";
+import AuthGuard from "@/components/layout/AuthGuard";
 import StepIndicator from "@/components/campaign/StepIndicator";
 import SelectBusiness from "@/components/campaign/SelectBusiness";
 import SelectNumbers from "@/components/campaign/SelectNumbers";
@@ -76,6 +77,7 @@ export default function NewCampaignPage() {
   };
 
   return (
+    <AuthGuard>
     <div className="flex h-screen">
       <Sidebar />
       <main className="flex-1 overflow-y-auto p-6">
@@ -86,5 +88,6 @@ export default function NewCampaignPage() {
         </div>
       </main>
     </div>
+    </AuthGuard>
   );
 }

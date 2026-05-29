@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Sidebar from "@/components/layout/Sidebar";
+import AuthGuard from "@/components/layout/AuthGuard";
 import { Business } from "@/types";
 import { apiRequest } from "@/lib/api";
 import { Phone } from "lucide-react";
@@ -26,6 +27,7 @@ export default function BusinessesPage() {
   };
 
   return (
+    <AuthGuard>
     <div className="flex h-screen">
       <Sidebar />
       <main className="flex-1 overflow-y-auto p-6">
@@ -60,5 +62,6 @@ export default function BusinessesPage() {
         )}
       </main>
     </div>
+    </AuthGuard>
   );
 }
