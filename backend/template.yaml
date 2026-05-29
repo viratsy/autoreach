@@ -235,6 +235,34 @@ Resources:
             Path: /campaigns
             Method: POST
 
+  ListCampaignsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/list.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns
+            Method: GET
+
+  UploadUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/upload-url.handler
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref CSVBucket
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/upload-url
+            Method: POST
+
   SendCampaignFunction:
     Type: AWS::Serverless::Function
     Properties:

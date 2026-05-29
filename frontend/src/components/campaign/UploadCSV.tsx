@@ -2,7 +2,8 @@
 
 import { useRef, useState } from "react";
 import { CampaignDraft } from "@/app/campaigns/new/page";
-import { Upload } from "lucide-react";
+import { apiRequest } from "@/lib/api";
+import { Upload, CheckCircle } from "lucide-react";
 
 interface Props {
   draft: CampaignDraft;
@@ -21,11 +22,14 @@ export default function UploadCSV({ draft, onUpdate, onNext, onBack }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<Record<string, string>[]>([]);
   const [errors, setErrors] = useState<ValidationError[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploaded, setUploaded] = useState(false);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setUploaded(false);
     const reader = new FileReader();
     reader.onload = (event) => {
       const text = event.target?.result as string;
@@ -64,6 +68,37 @@ export default function UploadCSV({ draft, onUpdate, onNext, onBack }: Props) {
     reader.readAsText(file);
   };
 
+  const handleUpload = async () => {
+    if (!draft.csvFile) return;
+    setUploading(true);
+
+    try {
+      // Get presigned URL
+      const { uploadUrl, s3Key } = await apiRequest<{ uploadUrl: string; s3Key: string }>(
+        "/campaigns/upload-url",
+        {
+          method: "POST",
+          body: JSON.stringify({ fileName: draft.csvFile.name }),
+        }
+      );
+
+      // Upload CSV to S3
+      await fetch(uploadUrl, {
+        method: "PUT",
+        body: draft.csvFile,
+        headers: { "Content-Type": "text/csv" },
+      });
+
+      onUpdate({ csvS3Key: s3Key });
+      setUploaded(true);
+    } catch (err) {
+      console.error("Upload failed:", err);
+      setErrors([{ row: 0, phone: "", reason: "Upload failed. Please try again." }]);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6">
       <h3 className="text-lg font-semibold text-gray-900 mb-4">Upload CSV</h3>
@@ -80,10 +115,26 @@ export default function UploadCSV({ draft, onUpdate, onNext, onBack }: Props) {
         <input ref={fileRef} type="file" accept=".csv" onChange={handleFile} className="hidden" />
       </div>
 
-      {draft.csvFile && (
-        <p className="mt-3 text-sm text-gray-600">
-          {draft.csvRowCount} contacts found • {draft.csvHeaders.length} columns
-        </p>
+      {draft.csvFile && !uploaded && errors.length === 0 && (
+        <div className="mt-4">
+          <p className="text-sm text-gray-600 mb-2">
+            {draft.csvRowCount} contacts found • {draft.csvHeaders.length} columns
+          </p>
+          <button
+            onClick={handleUpload}
+            disabled={uploading}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-50 hover:bg-blue-700 transition-colors"
+          >
+            {uploading ? "Uploading..." : "Upload to Server"}
+          </button>
+        </div>
+      )}
+
+      {uploaded && (
+        <div className="mt-4 flex items-center gap-2 text-green-600">
+          <CheckCircle className="w-4 h-4" />
+          <p className="text-sm font-medium">CSV uploaded successfully</p>
+        </div>
       )}
 
       {errors.length > 0 && (
@@ -93,7 +144,7 @@ export default function UploadCSV({ draft, onUpdate, onNext, onBack }: Props) {
           </p>
           <ul className="text-xs text-red-600 space-y-1 max-h-32 overflow-y-auto">
             {errors.slice(0, 5).map((err, i) => (
-              <li key={i}>Row {err.row}: {err.reason} ({err.phone})</li>
+              <li key={i}>Row {err.row}: {err.reason} {err.phone && `(${err.phone})`}</li>
             ))}
             {errors.length > 5 && <li>...and {errors.length - 5} more</li>}
           </ul>
@@ -130,7 +181,7 @@ export default function UploadCSV({ draft, onUpdate, onNext, onBack }: Props) {
         </button>
         <button
           onClick={onNext}
-          disabled={!draft.csvFile || errors.length > 0}
+          disabled={!uploaded}
           className="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary-700 transition-colors"
         >
           Next

@@ -27,6 +27,7 @@ export interface CampaignDraft {
   csvFile: File | null;
   csvHeaders: string[];
   csvRowCount: number;
+  csvS3Key: string;
   template: Template | null;
   templateMappings: Record<string, string>;
   parameterMapping: Record<string, string>;
@@ -41,6 +42,7 @@ const initialDraft: CampaignDraft = {
   csvFile: null,
   csvHeaders: [],
   csvRowCount: 0,
+  csvS3Key: "",
   template: null,
   templateMappings: {},
   parameterMapping: {},
