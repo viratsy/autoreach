@@ -173,7 +173,7 @@ async function sendWhatsAppMessage(
     }
   );
 
-  const data = await response.json();
+  const data = (await response.json()) as { messages: { id: string }[]; error?: unknown };
   if (!response.ok) {
     throw new Error(`Meta API error: ${JSON.stringify(data)}`);
   }

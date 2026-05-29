@@ -7,7 +7,9 @@ import {
   Send,
   Building2,
   PlusCircle,
+  LogOut,
 } from "lucide-react";
+import { logout, getCurrentEmail } from "@/lib/api";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -18,6 +20,7 @@ const navItems = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const email = getCurrentEmail();
 
   return (
     <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
@@ -44,6 +47,16 @@ export default function Sidebar() {
           );
         })}
       </nav>
+      <div className="p-4 border-t border-gray-200">
+        <p className="text-xs text-gray-500 truncate mb-2">{email}</p>
+        <button
+          onClick={logout}
+          className="flex items-center gap-2 text-sm text-gray-600 hover:text-red-600 transition-colors"
+        >
+          <LogOut className="w-4 h-4" />
+          Logout
+        </button>
+      </div>
     </aside>
   );
 }

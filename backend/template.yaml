@@ -16,6 +16,9 @@ Globals:
         CSV_BUCKET: !Ref CSVBucket
         META_ACCESS_TOKEN: !Ref MetaAccessToken
         WEBHOOK_VERIFY_TOKEN: !Ref WebhookVerifyToken
+        SES_FROM_EMAIL: !Ref SesFromEmail
+        OTP_TABLE: !Ref OTPTable
+        JWT_SECRET: !Ref WebhookVerifyToken
 
 Parameters:
   MetaAccessToken:
@@ -28,6 +31,10 @@ Parameters:
     Type: String
     Default: "dev"
     Description: "Environment name (hardik/navin)"
+  SesFromEmail:
+    Type: String
+    Default: "otp@hardikraja.com"
+    Description: "SES verified sender email for OTP"
 
 Resources:
   # --- DynamoDB Tables ---
@@ -133,6 +140,25 @@ Resources:
         - AttributeName: SK
           KeyType: RANGE
 
+  OTPTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "autoreach-otp-${EnvName}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
   # --- S3 ---
   CSVBucket:
     Type: AWS::S3::Bucket
@@ -140,6 +166,31 @@ Resources:
       BucketName: !Sub "autoreach-csv-${EnvName}-${AWS::AccountId}"
 
   # --- Lambda Functions ---
+  RequestOTPFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/auth/request-otp.handler
+      Policies:
+        - SESCrudPolicy:
+            IdentityName: !Ref SesFromEmail
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /auth/request-otp
+            Method: POST
+
+  VerifyOTPFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/auth/verify-otp.handler
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /auth/verify-otp
+            Method: POST
+
   ListBusinessesFunction:
     Type: AWS::Serverless::Function
     Properties:
