@@ -9,6 +9,7 @@ import SelectNumbers from "@/components/campaign/SelectNumbers";
 import UploadCSV from "@/components/campaign/UploadCSV";
 import SelectTemplate from "@/components/campaign/SelectTemplate";
 import MapParameters from "@/components/campaign/MapParameters";
+import TestMessage from "@/components/campaign/TestMessage";
 import ReviewSchedule from "@/components/campaign/ReviewSchedule";
 import { Business, PhoneNumber, Template } from "@/types";
 
@@ -18,6 +19,7 @@ const STEPS = [
   "Upload CSV",
   "Select Template",
   "Map Parameters",
+  "Test Message",
   "Review & Schedule",
 ];
 
@@ -72,7 +74,9 @@ export default function NewCampaignPage() {
       case 4:
         return <MapParameters draft={draft} onUpdate={updateDraft} onNext={() => setStep(5)} onBack={() => setStep(3)} />;
       case 5:
-        return <ReviewSchedule draft={draft} onUpdate={updateDraft} onBack={() => setStep(4)} />;
+        return <TestMessage draft={draft} onNext={() => setStep(6)} onBack={() => setStep(4)} />;
+      case 6:
+        return <ReviewSchedule draft={draft} onUpdate={updateDraft} onBack={() => setStep(5)} />;
       default:
         return null;
     }

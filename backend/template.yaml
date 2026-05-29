@@ -308,6 +308,21 @@ Resources:
             Path: /campaigns/upload-url
             Method: POST
 
+  TestSendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/test-send.handler
+      Timeout: 60
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/test-send
+            Method: POST
+
   SendCampaignFunction:
     Type: AWS::Serverless::Function
     Properties:
