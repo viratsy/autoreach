@@ -1,9 +1,8 @@
-import { APIGatewayProxyHandler } from "aws-lambda";
+import { Handler } from "aws-lambda";
 import { GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { docClient, TABLES } from "../../lib/dynamo";
 import { distributeContacts } from "../../lib/round-robin";
-import { success, error } from "../../lib/response";
 import { CSVContact, CampaignRecord } from "../../lib/types";
 
 const s3 = new S3Client({});
@@ -13,10 +12,17 @@ const s3 = new S3Client({});
  * Fetches CSV from S3, distributes contacts via round-robin,
  * sends messages through Meta API, and stores message records.
  */
-export const handler: APIGatewayProxyHandler = async (event) => {
-  try {
-    const { campaignId } = JSON.parse(event.body || "{}");
+export const handler: Handler = async (event) => {
+  console.log("Send handler invoked with:", JSON.stringify(event));
 
+  try {
+    // Handle both EventBridge (direct payload) and API Gateway (body) invocations
+    const campaignId = event.campaignId || JSON.parse(event.body || "{}").campaignId;
+
+    if (!campaignId) {
+      console.error("No campaignId in event");
+      return { statusCode: 400, body: "Missing campaignId" };
+    }
     // Get campaign record
     const campaignResult = await docClient.send(
       new GetCommand({
@@ -26,7 +32,10 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     );
 
     const campaign = campaignResult.Item as CampaignRecord | undefined;
-    if (!campaign) return error(404, "Campaign not found");
+    if (!campaign) {
+      console.error("Campaign not found:", campaignId);
+      return;
+    }
 
     // Update status to running
     await updateCampaignStatus(campaignId, "running");
@@ -93,10 +102,11 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     const finalStatus = failedCount === contacts.length ? "failed" : "completed";
     await updateCampaignStatus(campaignId, finalStatus);
 
-    return success({ sent: sentCount, failed: failedCount });
+    console.log(`Campaign ${campaignId} completed: sent=${sentCount}, failed=${failedCount}`);
+    return { sent: sentCount, failed: failedCount };
   } catch (err) {
     console.error("Campaign send error:", err);
-    return error(500, "Campaign execution failed");
+    return { error: "Campaign execution failed" };
   }
 };
 
@@ -148,10 +158,12 @@ async function sendWhatsAppMessage(
   // Build template parameters from mapping
   const parameters = Object.entries(campaign.parameterMapping)
     .sort(([a], [b]) => Number(a) - Number(b))
-    .map(([, csvHeader]) => ({
-      type: "text",
-      text: contact[csvHeader] || "",
-    }));
+    .map(([, csvHeaderOrStatic]) => {
+      if (csvHeaderOrStatic.startsWith("__STATIC__")) {
+        return { type: "text", text: csvHeaderOrStatic.replace("__STATIC__", "") };
+      }
+      return { type: "text", text: contact[csvHeaderOrStatic] || "" };
+    });
 
   // Get the template name for this number (may be mapped differently)
   const templateName =

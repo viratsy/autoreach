@@ -45,6 +45,19 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       const tplName = templateMappings?.[number.phoneNumberId] || templateName;
 
       try {
+        const requestBody = {
+          messaging_product: "whatsapp",
+          to: testPhone,
+          type: "template",
+          template: {
+            name: tplName,
+            language: { code: "en" },
+            components: buildTemplateComponents(parameterValues),
+          },
+        };
+
+        console.log(`Sending to ${number.phoneNumberId}:`, JSON.stringify(requestBody));
+
         const response = await fetch(
           `https://graph.facebook.com/v18.0/${number.phoneNumberId}/messages`,
           {
@@ -53,20 +66,13 @@ export const handler: APIGatewayProxyHandler = async (event) => {
               Authorization: `Bearer ${accessToken}`,
               "Content-Type": "application/json",
             },
-            body: JSON.stringify({
-              messaging_product: "whatsapp",
-              to: testPhone,
-              type: "template",
-              template: {
-                name: tplName,
-                language: { code: "en" },
-                components: buildTemplateComponents(parameterValues),
-              },
-            }),
+            body: JSON.stringify(requestBody),
           }
         );
 
         const data = (await response.json()) as { messages?: { id: string; message_status?: string }[]; error?: { message: string; code?: number } };
+
+        console.log(`Response from ${number.phoneNumberId}:`, JSON.stringify(data));
 
         if (response.ok && data.messages?.[0]) {
           results.push({
@@ -109,6 +115,8 @@ function buildTemplateComponents(parameterValues: Record<string, string>) {
     .sort(([a], [b]) => Number(a) - Number(b))
     .map(([, value]) => ({ type: "text", text: value }));
 
+  // Send all as body params - this is the most common case
+  // If template has buttons with dynamic URLs, they need separate handling
   return [
     {
       type: "body",
