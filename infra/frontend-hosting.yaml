@@ -5,6 +5,17 @@ Parameters:
   EnvName:
     Type: String
     Description: "Environment name (hardik/navin)"
+  DomainName:
+    Type: String
+    Description: "Custom domain name for the frontend"
+    Default: ""
+  CertificateArn:
+    Type: String
+    Description: "ACM certificate ARN (must be in us-east-1)"
+    Default: ""
+
+Conditions:
+  HasCustomDomain: !Not [!Equals [!Ref DomainName, ""]]
 
 Resources:
   FrontendBucket:
@@ -50,6 +61,18 @@ Resources:
       DistributionConfig:
         Enabled: true
         DefaultRootObject: index.html
+        Aliases:
+          !If
+            - HasCustomDomain
+            - [!Ref DomainName]
+            - !Ref "AWS::NoValue"
+        ViewerCertificate:
+          !If
+            - HasCustomDomain
+            - AcmCertificateArn: !Ref CertificateArn
+              SslSupportMethod: sni-only
+              MinimumProtocolVersion: TLSv1.2_2021
+            - CloudFrontDefaultCertificate: true
         Origins:
           - Id: S3Origin
             DomainName: !GetAtt FrontendBucket.RegionalDomainName
