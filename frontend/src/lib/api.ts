@@ -10,8 +10,9 @@ export async function apiRequest<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const token = getToken();
+  const cleanPath = path.endsWith("/") ? path.slice(0, -1) : path;
 
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(`${API_URL}${cleanPath}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
