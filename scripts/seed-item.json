@@ -4,18 +4,17 @@
   "businessId": {"S": "skill_nation"},
   "businessName": {"S": "Skill Nation"},
   "wabaId": {"S": "skill_nation_waba"},
+  "accessToken": {"S": "PASTE_YOUR_TOKEN_HERE"},
   "phoneNumbers": {"L": [
     {"M": {
       "phoneNumberId": {"S": "767721219763053"},
       "displayNumber": {"S": "SN2029"},
-      "displayName": {"S": "SN2029"},
-      "accessToken": {"S": "SN2029-token"}
+      "displayName": {"S": "SN2029"}
     }},
     {"M": {
       "phoneNumberId": {"S": "861946696997409"},
       "displayNumber": {"S": "SN129"},
-      "displayName": {"S": "SN129"},
-      "accessToken": {"S": "SN129-token"}
+      "displayName": {"S": "SN129"}
     }}
   ]},
   "createdAt": {"S": "2026-05-29T10:00:00Z"},

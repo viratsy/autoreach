@@ -3,12 +3,12 @@ export interface PhoneNumber {
   phoneNumberId: string;
   displayNumber: string;
   displayName: string;
+  wabaid: string;
 }
 
 export interface Business {
   businessId: string;
   businessName: string;
-  wabaId: string;
   phoneNumbers: PhoneNumber[];
   createdAt: string;
   updatedAt: string;

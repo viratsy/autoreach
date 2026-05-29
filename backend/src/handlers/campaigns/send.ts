@@ -31,7 +31,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     // Update status to running
     await updateCampaignStatus(campaignId, "running");
 
-    // Fetch business record for tokens
+    // Fetch business record for token
     const bizResult = await docClient.send(
       new GetCommand({
         TableName: TABLES.BUSINESSES,
@@ -39,12 +39,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       })
     );
     const business = bizResult.Item;
-    const tokenMap: Record<string, string> = {};
-    if (business?.phoneNumbers) {
-      for (const pn of business.phoneNumbers) {
-        tokenMap[pn.phoneNumberId] = pn.accessToken;
-      }
-    }
+    const accessToken = business?.accessToken || process.env.META_ACCESS_TOKEN || "";
 
     // Fetch CSV from S3
     const contacts = await fetchCSVFromS3(campaign.csvS3Key);
@@ -62,7 +57,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           campaign,
           contact,
           assignedNumber.phoneNumberId,
-          tokenMap[assignedNumber.phoneNumberId] || process.env.META_ACCESS_TOKEN || ""
+          accessToken
         );
 
         // Store message record

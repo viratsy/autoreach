@@ -15,8 +15,12 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     const businesses = (result.Items || []).map((item) => ({
       businessId: item.businessId,
       businessName: item.businessName,
-      wabaId: item.wabaId,
-      phoneNumbers: item.phoneNumbers,
+      phoneNumbers: (item.phoneNumbers || []).map((pn: Record<string, string>) => ({
+        phoneNumberId: pn.phoneNumberId,
+        displayNumber: pn.displayNumber,
+        displayName: pn.displayName,
+        wabaid: pn.wabaid,
+      })),
       createdAt: item.createdAt,
     }));
 
