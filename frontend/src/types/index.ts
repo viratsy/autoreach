@@ -9,6 +9,7 @@ export interface PhoneNumber {
 export interface Business {
   businessId: string;
   businessName: string;
+  metaBusinessId?: string;
   phoneNumbers: PhoneNumber[];
   createdAt: string;
   updatedAt: string;

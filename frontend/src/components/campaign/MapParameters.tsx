@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { CampaignDraft } from "@/app/campaigns/new/page";
 
 interface Props {
@@ -9,31 +10,92 @@ interface Props {
   onBack: () => void;
 }
 
+type MappingSource = "csv" | "manual";
+
+interface ParamConfig {
+  source: MappingSource;
+  csvColumn: string;
+  manualValue: string;
+}
+
 export default function MapParameters({ draft, onUpdate, onNext, onBack }: Props) {
   const paramCount = draft.template?.parameterCount || 0;
   const params = Array.from({ length: paramCount }, (_, i) => String(i + 1));
 
-  const handleMap = (paramIndex: string, csvHeader: string) => {
-    onUpdate({
-      parameterMapping: { ...draft.parameterMapping, [paramIndex]: csvHeader },
+  // Get template body text
+  const bodyComponent = draft.template?.components?.find(
+    (c) => (c.type as string).toUpperCase() === "BODY"
+  );
+  const templateBody = (bodyComponent as unknown as { text?: string })?.text || "";
+
+  // Track source type per parameter
+  const [paramConfigs, setParamConfigs] = useState<Record<string, ParamConfig>>(() => {
+    const initial: Record<string, ParamConfig> = {};
+    params.forEach((p) => {
+      initial[p] = {
+        source: "csv",
+        csvColumn: draft.parameterMapping[p] || "",
+        manualValue: "",
+      };
     });
-  };
+    return initial;
+  });
 
-  // Auto-match common patterns
-  const autoMatch = () => {
+  const updateParam = (paramIndex: string, updates: Partial<ParamConfig>) => {
+    const newConfigs = { ...paramConfigs, [paramIndex]: { ...paramConfigs[paramIndex], ...updates } };
+    setParamConfigs(newConfigs);
+
+    // Update the draft parameterMapping
     const mapping: Record<string, string> = {};
-    const headerLower = draft.csvHeaders.map((h) => h.toLowerCase());
-
-    params.forEach((p, i) => {
-      // Simple heuristic: match by position if names don't match
-      if (headerLower[i] && headerLower[i] !== "phone") {
-        mapping[p] = draft.csvHeaders[i];
+    Object.entries(newConfigs).forEach(([key, config]) => {
+      if (config.source === "csv" && config.csvColumn) {
+        mapping[key] = config.csvColumn;
+      } else if (config.source === "manual" && config.manualValue) {
+        mapping[key] = `__STATIC__${config.manualValue}`;
       }
     });
     onUpdate({ parameterMapping: mapping });
   };
 
-  const allMapped = params.every((p) => draft.parameterMapping[p]);
+  // Auto-match CSV headers to parameters
+  const autoMatch = () => {
+    const newConfigs = { ...paramConfigs };
+    const csvHeaders = draft.csvHeaders.filter((h) => h !== "phone");
+    params.forEach((p, i) => {
+      if (csvHeaders[i]) {
+        newConfigs[p] = { source: "csv", csvColumn: csvHeaders[i], manualValue: "" };
+      }
+    });
+    setParamConfigs(newConfigs);
+
+    const mapping: Record<string, string> = {};
+    Object.entries(newConfigs).forEach(([key, config]) => {
+      if (config.csvColumn) mapping[key] = config.csvColumn;
+    });
+    onUpdate({ parameterMapping: mapping });
+  };
+
+  // Generate preview with filled values
+  const getPreview = () => {
+    let preview = templateBody;
+    params.forEach((p) => {
+      const config = paramConfigs[p];
+      let value = "___";
+      if (config.source === "csv" && config.csvColumn) {
+        value = `[${config.csvColumn}]`;
+      } else if (config.source === "manual" && config.manualValue) {
+        value = config.manualValue;
+      }
+      preview = preview.replace(`{{${p}}}`, value);
+    });
+    return preview;
+  };
+
+  const allMapped = params.every((p) => {
+    const config = paramConfigs[p];
+    return (config.source === "csv" && config.csvColumn) ||
+           (config.source === "manual" && config.manualValue);
+  });
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6">
@@ -44,39 +106,85 @@ export default function MapParameters({ draft, onUpdate, onNext, onBack }: Props
         </button>
       </div>
 
-      {draft.template && (
-        <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-          <p className="text-xs text-gray-500 mb-1">Template preview:</p>
-          <p className="text-sm text-gray-700">
-            {draft.template.components[0]?.text || "No body text"}
-          </p>
+      {/* Template Body Preview */}
+      {templateBody && (
+        <div className="mb-5 p-4 bg-gray-50 rounded-lg border border-gray-200">
+          <p className="text-xs text-gray-500 mb-2 font-medium">Template Body:</p>
+          <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{templateBody}</p>
         </div>
       )}
 
-      <div className="space-y-3">
-        {params.map((paramIndex) => (
-          <div key={paramIndex} className="flex items-center gap-4">
-            <span className="text-sm text-gray-600 w-32">
-              Parameter {"{{"}{paramIndex}{"}}"}
-            </span>
-            <span className="text-gray-400">→</span>
-            <select
-              value={draft.parameterMapping[paramIndex] || ""}
-              onChange={(e) => handleMap(paramIndex, e.target.value)}
-              className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2"
-            >
-              <option value="">Select CSV column</option>
-              {draft.csvHeaders
-                .filter((h) => h !== "phone")
-                .map((header) => (
-                  <option key={header} value={header}>
-                    {header}
-                  </option>
-                ))}
-            </select>
-          </div>
-        ))}
+      {/* Parameter Mapping */}
+      <div className="space-y-4">
+        {params.map((paramIndex) => {
+          const config = paramConfigs[paramIndex];
+          return (
+            <div key={paramIndex} className="border border-gray-100 rounded-lg p-3">
+              <div className="flex items-center gap-3 mb-2">
+                <span className="text-sm font-medium text-gray-700 w-24">
+                  {`{{${paramIndex}}}`}
+                </span>
+                {/* Source toggle */}
+                <div className="flex bg-gray-100 rounded-md p-0.5">
+                  <button
+                    onClick={() => updateParam(paramIndex, { source: "csv" })}
+                    className={`px-3 py-1 text-xs rounded ${
+                      config.source === "csv"
+                        ? "bg-white text-gray-900 shadow-sm font-medium"
+                        : "text-gray-500"
+                    }`}
+                  >
+                    From CSV
+                  </button>
+                  <button
+                    onClick={() => updateParam(paramIndex, { source: "manual" })}
+                    className={`px-3 py-1 text-xs rounded ${
+                      config.source === "manual"
+                        ? "bg-white text-gray-900 shadow-sm font-medium"
+                        : "text-gray-500"
+                    }`}
+                  >
+                    Static Value
+                  </button>
+                </div>
+              </div>
+
+              {config.source === "csv" ? (
+                <select
+                  value={config.csvColumn}
+                  onChange={(e) => updateParam(paramIndex, { csvColumn: e.target.value })}
+                  className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2"
+                >
+                  <option value="">Select CSV column</option>
+                  {draft.csvHeaders
+                    .filter((h) => h !== "phone")
+                    .map((header) => (
+                      <option key={header} value={header}>
+                        {header}
+                      </option>
+                    ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={config.manualValue}
+                  onChange={(e) => updateParam(paramIndex, { manualValue: e.target.value })}
+                  placeholder="Enter static value (same for all contacts)"
+                  className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2"
+                />
+              )}
+            </div>
+          );
+        })}
       </div>
+
+      {/* Live Preview */}
+      {templateBody && (
+        <div className="mt-5 p-4 bg-green-50 rounded-lg border border-green-200">
+          <p className="text-xs text-green-700 mb-2 font-medium">Message Preview:</p>
+          <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{getPreview()}</p>
+        </div>
+      )}
 
       <div className="mt-6 flex justify-between">
         <button onClick={onBack} className="px-4 py-2 text-gray-600 text-sm font-medium hover:text-gray-900">
