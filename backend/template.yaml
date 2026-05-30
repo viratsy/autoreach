@@ -320,6 +320,21 @@ Resources:
             Path: /businesses
             Method: GET
 
+  SubscribeWebhooksFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/businesses/subscribe-webhooks.handler
+      Timeout: 30
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /businesses/subscribe-webhooks
+            Method: POST
+
   CreateCampaignFunction:
     Type: AWS::Serverless::Function
     Properties:

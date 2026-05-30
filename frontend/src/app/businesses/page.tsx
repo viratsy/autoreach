@@ -55,6 +55,23 @@ export default function BusinessesPage() {
                     </div>
                   ))}
                 </div>
+                <button
+                  onClick={async () => {
+                    try {
+                      const data = await apiRequest<{ results: { wabaid: string; status: string; error?: string }[] }>(
+                        "/businesses/subscribe-webhooks",
+                        { method: "POST", body: JSON.stringify({ businessId: biz.businessId }) }
+                      );
+                      const msg = data.results.map(r => `${r.wabaid}: ${r.status}${r.error ? ` (${r.error})` : ""}`).join("\n");
+                      alert(msg);
+                    } catch (err) {
+                      alert("Failed to subscribe");
+                    }
+                  }}
+                  className="mt-4 text-xs text-blue-600 hover:text-blue-700 font-medium"
+                >
+                  Subscribe WABAs to Webhooks
+                </button>
               </div>
             ))}
           </div>
