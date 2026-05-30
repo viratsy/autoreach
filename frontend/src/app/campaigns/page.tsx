@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Link from "next/link";
 import Sidebar from "@/components/layout/Sidebar";
 import AuthGuard from "@/components/layout/AuthGuard";
 import { Campaign, CampaignStatus } from "@/types";
@@ -50,13 +49,13 @@ export default function CampaignsPage() {
         <main className="flex-1 overflow-y-auto p-6">
           <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-gray-900">Campaigns</h2>
-          <Link
-            href="/campaigns/new"
+          <a
+            href="/campaigns/new/"
             className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium hover:bg-primary-700 transition-colors"
           >
             <PlusCircle className="w-4 h-4" />
             New Campaign
-          </Link>
+          </a>
         </div>
 
         {/* Filters */}
@@ -88,9 +87,9 @@ export default function CampaignsPage() {
         ) : filtered.length === 0 ? (
           <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
             <p className="text-gray-500">No campaigns found.</p>
-            <Link href="/campaigns/new" className="text-primary-600 text-sm mt-2 inline-block hover:underline">
+            <a href="/campaigns/new/" className="text-primary-600 text-sm mt-2 inline-block hover:underline">
               Create your first campaign
-            </Link>
+            </a>
           </div>
         ) : (
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -120,10 +119,18 @@ export default function CampaignsPage() {
                       <td className="px-6 py-3 text-gray-600">{campaign.totalContacts}</td>
                       <td className="px-6 py-3">
                         <div className="flex gap-2">
-                          <Link href={`/campaigns/${campaign.campaignId}`} className="text-primary-600 hover:text-primary-800 text-xs font-medium">
+                          <a href={`/campaigns/view/?id=${campaign.campaignId}`} className="text-primary-600 hover:text-primary-800 text-xs font-medium">
                             View
-                          </Link>
-                          <button className="text-gray-500 hover:text-gray-700 text-xs font-medium">
+                          </a>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await apiRequest(`/campaigns/${campaign.campaignId}/duplicate`, { method: "POST" });
+                                window.location.reload();
+                              } catch {}
+                            }}
+                            className="text-gray-500 hover:text-gray-700 text-xs font-medium"
+                          >
                             Duplicate
                           </button>
                           {campaign.status === "scheduled" && (

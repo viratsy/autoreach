@@ -348,6 +348,36 @@ Resources:
             Path: /campaigns
             Method: GET
 
+  GetCampaignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/get.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/{campaignId}
+            Method: GET
+
+  DuplicateCampaignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/duplicate.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/{campaignId}/duplicate
+            Method: POST
+
   UploadUrlFunction:
     Type: AWS::Serverless::Function
     Properties:
