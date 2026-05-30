@@ -136,6 +136,17 @@ export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Prop
   );
   const canProceed = draft.template && allIssuesResolved;
 
+  const handleNext = () => {
+    // Remove skipped numbers from selectedNumbers before proceeding
+    if (skippedNumbers.length > 0) {
+      const activeNumbers = draft.selectedNumbers.filter(
+        (n) => !skippedNumbers.includes(n.phoneNumberId)
+      );
+      onUpdate({ selectedNumbers: activeNumbers });
+    }
+    onNext();
+  };
+
   const getNumberName = (phoneNumberId: string) => {
     return draft.selectedNumbers.find((n) => n.phoneNumberId === phoneNumberId)?.displayName || phoneNumberId;
   };
@@ -340,7 +351,7 @@ export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Prop
           Back
         </button>
         <button
-          onClick={onNext}
+          onClick={handleNext}
           disabled={!canProceed}
           className="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary-700 transition-colors"
         >
