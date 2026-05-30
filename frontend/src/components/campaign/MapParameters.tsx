@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CampaignDraft } from "@/app/campaigns/new/page";
+import ImagePicker from "./ImagePicker";
 
 interface Props {
   draft: CampaignDraft;
@@ -117,23 +118,20 @@ export default function MapParameters({ draft, onUpdate, onNext, onBack }: Props
         </div>
       )}
 
-      {/* Header Image URL (only if some numbers have image header) */}
+      {/* Header Image (only if some numbers have image header) */}
       {draft.numbersWithImageHeader.length > 0 && (
         <div className="mb-5 p-4 bg-blue-50 border border-blue-200 rounded-lg">
           <label className="block text-sm font-medium text-blue-800 mb-1">
-            Header Image URL
+            Header Image
           </label>
-          <p className="text-xs text-blue-600 mb-2">
+          <p className="text-xs text-blue-600 mb-3">
             Required for: {draft.numbersWithImageHeader.map(id => 
               draft.selectedNumbers.find(n => n.phoneNumberId === id)?.displayName
             ).join(", ")}
           </p>
-          <input
-            type="text"
-            value={draft.headerImageUrl || ""}
-            onChange={(e) => onUpdate({ headerImageUrl: e.target.value })}
-            placeholder="https://example.com/image.jpg"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          <ImagePicker
+            value={draft.headerImageUrl}
+            onChange={(url) => onUpdate({ headerImageUrl: url })}
           />
         </div>
       )}
