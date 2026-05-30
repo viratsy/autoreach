@@ -4,10 +4,10 @@
  * Source: Meta pricing page
  */
 export const PRICING_INR = {
-  utility: 0.30, // Utility template per delivered message
-  marketing: 0.78, // Marketing template per delivered message
-  authentication: 0.30,
-  service: 0.00, // Free within 24hr window
+  utility: 0.115,
+  marketing: 0.8631,
+  authentication: 0.115,
+  service: 0.00,
 };
 
 export function estimateCost(

@@ -142,11 +142,11 @@ export default function ReviewSchedule({ draft, onUpdate, onBack }: Props) {
           <div className="flex justify-between">
             <span className="text-gray-500">Estimated Cost</span>
             <span className="text-gray-900 font-bold">
-              ₹{((draft.template?.category === "MARKETING" ? 0.78 : 0.30) * draft.csvRowCount).toFixed(2)}
+              ₹{((draft.template?.category === "MARKETING" ? 0.8631 : 0.115) * draft.csvRowCount).toFixed(2)}
             </span>
           </div>
           <p className="text-xs text-gray-400 mt-1">
-            {draft.template?.category === "MARKETING" ? "₹0.78" : "₹0.30"}/msg × {draft.csvRowCount} contacts (charged on delivery)
+            {draft.template?.category === "MARKETING" ? "₹0.8631" : "₹0.115"}/msg × {draft.csvRowCount} contacts (charged on delivery)
           </p>
         </div>
       </div>
