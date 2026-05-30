@@ -134,7 +134,17 @@ export default function CampaignsPage() {
                             Duplicate
                           </button>
                           {campaign.status === "scheduled" && (
-                            <button className="text-red-500 hover:text-red-700 text-xs font-medium">
+                            <button
+                              onClick={async () => {
+                                if (confirm("Cancel this campaign?")) {
+                                  try {
+                                    await apiRequest(`/campaigns/${campaign.campaignId}/cancel`, { method: "POST" });
+                                    window.location.reload();
+                                  } catch {}
+                                }
+                              }}
+                              className="text-red-500 hover:text-red-700 text-xs font-medium"
+                            >
                               Cancel
                             </button>
                           )}

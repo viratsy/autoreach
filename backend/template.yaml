@@ -395,6 +395,30 @@ Resources:
             Path: /campaigns/{campaignId}/duplicate
             Method: POST
 
+  CancelCampaignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/cancel.handler
+      Environment:
+        Variables:
+          SCHEDULER_GROUP: !Sub "autoreach-${EnvName}"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - scheduler:DeleteSchedule
+              Resource:
+                - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/autoreach-${EnvName}/*"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/{campaignId}/cancel
+            Method: POST
+
   UploadUrlFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -573,6 +597,24 @@ Resources:
           Properties:
             Path: /templates/copy
             Method: POST
+
+  DailySyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/templates/daily-sync.handler
+      Timeout: 300
+      MemorySize: 256
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TemplatesTable
+      Events:
+        DailySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 3 * * ? *)
+            Description: "Daily template sync at 8:30 AM IST"
 
   MetaWebhookFunction:
     Type: AWS::Serverless::Function

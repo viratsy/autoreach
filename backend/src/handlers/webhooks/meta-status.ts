@@ -30,10 +30,15 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     for (const entry of entries) {
       const changes = entry.changes || [];
       for (const change of changes) {
+        // Handle message status updates
         const statuses = change.value?.statuses || [];
-
         for (const status of statuses) {
           await processStatusUpdate(status);
+        }
+
+        // Handle template category updates
+        if (change.field === "template_category_update") {
+          await processTemplateCategoryUpdate(change.value, entry.id);
         }
       }
     }
@@ -97,4 +102,24 @@ async function processStatusUpdate(status: {
       })
     );
   }
+}
+
+async function processTemplateCategoryUpdate(value: {
+  message_template_name?: string;
+  previous_category?: string;
+  new_category?: string;
+}, wabaid: string) {
+  const templateName = value.message_template_name;
+  const newCategory = value.new_category;
+
+  if (!templateName || !newCategory) return;
+
+  console.log(`Template category update: ${templateName} → ${newCategory} (WABA: ${wabaid})`);
+
+  // Scan templates table for this template name and update category
+  // We don't know the exact PK/SK without the businessId, so we log it
+  // The daily sync will pick up the change. For immediate effect,
+  // we'd need to know which business this WABA belongs to.
+  // For now, log the change for monitoring.
+  console.log(`ACTION NEEDED: Template "${templateName}" changed to ${newCategory} on WABA ${wabaid}`);
 }
