@@ -19,6 +19,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       templateName,
       templateMappings,
       parameterValues,
+      headerImageUrl,
       testPhone,
     } = JSON.parse(event.body || "{}");
 
@@ -52,7 +53,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           template: {
             name: tplName,
             language: { code: "en" },
-            components: buildTemplateComponents(parameterValues),
+            components: buildTemplateComponents(parameterValues, headerImageUrl),
           },
         };
 
@@ -108,19 +109,30 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
 /**
  * Build template components array for Meta API.
- * All parameters go as body parameters.
+ * Handles body parameters and optional header image.
  */
-function buildTemplateComponents(parameterValues: Record<string, string>) {
+function buildTemplateComponents(parameterValues: Record<string, string>, headerImageUrl?: string) {
+  const components: unknown[] = [];
+
+  // Header image if provided
+  if (headerImageUrl) {
+    components.push({
+      type: "header",
+      parameters: [{ type: "image", image: { link: headerImageUrl } }],
+    });
+  }
+
+  // Body parameters
   const bodyParams = Object.entries(parameterValues)
     .sort(([a], [b]) => Number(a) - Number(b))
     .map(([, value]) => ({ type: "text", text: value }));
 
-  // Send all as body params - this is the most common case
-  // If template has buttons with dynamic URLs, they need separate handling
-  return [
-    {
+  if (bodyParams.length > 0) {
+    components.push({
       type: "body",
       parameters: bodyParams,
-    },
-  ];
+    });
+  }
+
+  return components;
 }

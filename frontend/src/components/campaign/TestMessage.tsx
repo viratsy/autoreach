@@ -56,6 +56,7 @@ export default function TestMessage({ draft, onNext, onBack }: Props) {
           templateName: draft.template!.templateName,
           templateMappings: draft.templateMappings,
           parameterValues: paramValues,
+          headerImageUrl: draft.headerImageUrl || undefined,
           testPhone,
         }),
       });
@@ -88,9 +89,15 @@ export default function TestMessage({ draft, onNext, onBack }: Props) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6">
       <h3 className="text-lg font-semibold text-gray-900 mb-1">Test Message</h3>
-      <p className="text-sm text-gray-500 mb-5">
+      <p className="text-sm text-gray-500 mb-2">
         Send a test message from all {draft.selectedNumbers.length} numbers to verify everything works.
       </p>
+      <div className="mb-5 p-3 bg-gray-50 rounded-lg text-sm">
+        <span className="text-gray-500">Template:</span>{" "}
+        <span className="font-medium text-gray-900">{draft.template?.templateName}</span>
+        <span className="text-gray-400 ml-2">• {draft.template?.parameterCount} params</span>
+        {draft.headerImageUrl && <span className="text-gray-400 ml-2">• has image header</span>}
+      </div>
 
       {/* Test Phone Number */}
       <div className="mb-5">

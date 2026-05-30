@@ -169,6 +169,22 @@ async function sendWhatsAppMessage(
   const templateName =
     campaign.templateMappings[phoneNumberId] || campaign.templateName;
 
+  // Build components
+  const components: unknown[] = [];
+
+  // Add header image if campaign has one
+  if ((campaign as unknown as { headerImageUrl?: string }).headerImageUrl) {
+    components.push({
+      type: "header",
+      parameters: [{ type: "image", image: { link: (campaign as unknown as { headerImageUrl: string }).headerImageUrl } }],
+    });
+  }
+
+  // Add body parameters
+  if (parameters.length > 0) {
+    components.push({ type: "body", parameters });
+  }
+
   const response = await fetch(
     `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
     {
@@ -184,12 +200,7 @@ async function sendWhatsAppMessage(
         template: {
           name: templateName,
           language: { code: "en" },
-          components: [
-            {
-              type: "body",
-              parameters,
-            },
-          ],
+          components,
         },
       }),
     }

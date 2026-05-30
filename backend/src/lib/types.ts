@@ -40,6 +40,7 @@ export interface CampaignRecord {
   templateMappings: Record<string, string>;
   parameterMapping: Record<string, string>;
   csvS3Key: string;
+  headerImageUrl?: string;
   totalContacts: number;
   scheduleDate: string;
   scheduleTime: string;

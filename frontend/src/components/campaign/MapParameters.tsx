@@ -109,10 +109,27 @@ export default function MapParameters({ draft, onUpdate, onNext, onBack }: Props
       {/* Template Body Preview */}
       {templateBody && (
         <div className="mb-5 p-4 bg-gray-50 rounded-lg border border-gray-200">
-          <p className="text-xs text-gray-500 mb-2 font-medium">Template Body:</p>
-          <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{templateBody}</p>
+          <p className="text-xs text-gray-500 mb-1 font-medium">
+            Template: <span className="text-gray-900">{draft.template?.templateName}</span>
+            <span className="ml-2 text-gray-400">({paramCount} body parameters)</span>
+          </p>
+          <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed mt-2">{templateBody}</p>
         </div>
       )}
+
+      {/* Header Image URL (if template has image header) */}
+      <div className="mb-5">
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Header Image URL <span className="text-gray-400 font-normal">(if template has image header)</span>
+        </label>
+        <input
+          type="text"
+          value={draft.headerImageUrl || ""}
+          onChange={(e) => onUpdate({ headerImageUrl: e.target.value })}
+          placeholder="https://example.com/image.jpg (leave empty if no image header)"
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+        />
+      </div>
 
       {/* Parameter Mapping */}
       <div className="space-y-4">

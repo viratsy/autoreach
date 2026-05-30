@@ -43,6 +43,7 @@ export default function ReviewSchedule({ draft, onUpdate, onBack }: Props) {
             templateName: draft.template!.templateName,
             templateMappings: draft.templateMappings,
             parameterMapping: draft.parameterMapping,
+            headerImageUrl: draft.headerImageUrl || undefined,
             csvS3Key: draft.csvS3Key,
             totalContacts: draft.csvRowCount,
             scheduleDate: draft.scheduleDate,
@@ -114,6 +115,10 @@ export default function ReviewSchedule({ draft, onUpdate, onBack }: Props) {
         <div className="flex justify-between">
           <span className="text-gray-500">Template</span>
           <span className="text-gray-900 font-medium">{draft.template?.templateName}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-500">Parameters</span>
+          <span className="text-gray-900 font-medium">{draft.template?.parameterCount} body params{draft.headerImageUrl ? " + image header" : ""}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-gray-500">Total Contacts</span>
