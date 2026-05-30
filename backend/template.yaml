@@ -194,6 +194,7 @@ Resources:
         Origins:
           - Id: S3Origin
             DomainName: !GetAtt CSVBucket.RegionalDomainName
+            OriginAccessControlId: !Ref CSVBucketOAC
             S3OriginConfig:
               OriginAccessIdentity: ""
         DefaultCacheBehavior:
@@ -206,6 +207,15 @@ Resources:
           Compress: true
           DefaultTTL: 86400
         PriceClass: PriceClass_100
+
+  CSVBucketOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "autoreach-csv-oac-${EnvName}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
 
   CSVBucketPolicy:
     Type: AWS::S3::BucketPolicy
