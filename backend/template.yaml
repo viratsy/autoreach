@@ -23,8 +23,8 @@ Globals:
     Cors:
       AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
       AllowHeaders: "'Content-Type,Authorization'"
-      AllowOrigin: "'https://autoreach.hardikraja.com'"
-      AllowCredentials: true
+      AllowOrigin: "'*'"
+      AllowCredentials: false
 
 Parameters:
   MetaAccessToken:
