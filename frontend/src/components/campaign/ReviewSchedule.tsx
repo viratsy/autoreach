@@ -44,6 +44,7 @@ export default function ReviewSchedule({ draft, onUpdate, onBack }: Props) {
             templateMappings: draft.templateMappings,
             parameterMapping: draft.parameterMapping,
             headerImageUrl: draft.headerImageUrl || undefined,
+            numbersWithImageHeader: draft.numbersWithImageHeader,
             csvS3Key: draft.csvS3Key,
             totalContacts: draft.csvRowCount,
             scheduleDate: draft.scheduleDate,

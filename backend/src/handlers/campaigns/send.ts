@@ -172,8 +172,9 @@ async function sendWhatsAppMessage(
   // Build components
   const components: unknown[] = [];
 
-  // Add header image if campaign has one
-  if ((campaign as unknown as { headerImageUrl?: string }).headerImageUrl) {
+  // Add header image only if this specific number needs it
+  const numbersWithImageHeader = (campaign as unknown as { numbersWithImageHeader?: string[] }).numbersWithImageHeader || [];
+  if ((campaign as unknown as { headerImageUrl?: string }).headerImageUrl && numbersWithImageHeader.includes(phoneNumberId)) {
     components.push({
       type: "header",
       parameters: [{ type: "image", image: { link: (campaign as unknown as { headerImageUrl: string }).headerImageUrl } }],

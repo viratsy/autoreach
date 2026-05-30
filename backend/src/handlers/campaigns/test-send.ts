@@ -20,6 +20,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       templateMappings,
       parameterValues,
       headerImageUrl,
+      numbersWithImageHeader,
       testPhone,
     } = JSON.parse(event.body || "{}");
 
@@ -53,7 +54,11 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           template: {
             name: tplName,
             language: { code: "en" },
-            components: buildTemplateComponents(parameterValues, headerImageUrl),
+            components: buildTemplateComponents(
+              parameterValues,
+              // Only include image for numbers that need it
+              numbersWithImageHeader?.includes(number.phoneNumberId) ? headerImageUrl : undefined
+            ),
           },
         };
 

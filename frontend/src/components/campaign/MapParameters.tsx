@@ -117,19 +117,26 @@ export default function MapParameters({ draft, onUpdate, onNext, onBack }: Props
         </div>
       )}
 
-      {/* Header Image URL (if template has image header) */}
-      <div className="mb-5">
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Header Image URL <span className="text-gray-400 font-normal">(if template has image header)</span>
-        </label>
-        <input
-          type="text"
-          value={draft.headerImageUrl || ""}
-          onChange={(e) => onUpdate({ headerImageUrl: e.target.value })}
-          placeholder="https://example.com/image.jpg (leave empty if no image header)"
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-        />
-      </div>
+      {/* Header Image URL (only if some numbers have image header) */}
+      {draft.numbersWithImageHeader.length > 0 && (
+        <div className="mb-5 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <label className="block text-sm font-medium text-blue-800 mb-1">
+            Header Image URL
+          </label>
+          <p className="text-xs text-blue-600 mb-2">
+            Required for: {draft.numbersWithImageHeader.map(id => 
+              draft.selectedNumbers.find(n => n.phoneNumberId === id)?.displayName
+            ).join(", ")}
+          </p>
+          <input
+            type="text"
+            value={draft.headerImageUrl || ""}
+            onChange={(e) => onUpdate({ headerImageUrl: e.target.value })}
+            placeholder="https://example.com/image.jpg"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          />
+        </div>
+      )}
 
       {/* Parameter Mapping */}
       <div className="space-y-4">

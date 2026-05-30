@@ -57,6 +57,7 @@ export default function TestMessage({ draft, onNext, onBack }: Props) {
           templateMappings: draft.templateMappings,
           parameterValues: paramValues,
           headerImageUrl: draft.headerImageUrl || undefined,
+          numbersWithImageHeader: draft.numbersWithImageHeader,
           testPhone,
         }),
       });

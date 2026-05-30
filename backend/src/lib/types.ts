@@ -41,6 +41,7 @@ export interface CampaignRecord {
   parameterMapping: Record<string, string>;
   csvS3Key: string;
   headerImageUrl?: string;
+  numbersWithImageHeader?: string[];
   totalContacts: number;
   scheduleDate: string;
   scheduleTime: string;

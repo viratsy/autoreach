@@ -39,6 +39,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       availableOn: string[];
       categoryPerNumber: Record<string, string>;
       paramCountPerNumber: Record<string, number>;
+      hasImageHeaderPerNumber: Record<string, boolean>;
     }> = {};
 
     for (const item of items) {
@@ -52,6 +53,13 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         continue;
       }
 
+      // Check if template has image header
+      const hasImageHeader = (item.components || []).some(
+        (c: { type?: string; format?: string }) =>
+          (c.type === "HEADER" || c.type === "header") &&
+          (c.format === "IMAGE" || c.format === "image")
+      );
+
       if (!templateMap[templateName]) {
         templateMap[templateName] = {
           templateName,
@@ -61,11 +69,13 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           availableOn: [],
           categoryPerNumber: {},
           paramCountPerNumber: {},
+          hasImageHeaderPerNumber: {},
         };
       }
       templateMap[templateName].availableOn.push(phoneNumberId);
       templateMap[templateName].categoryPerNumber[phoneNumberId] = item.category;
       templateMap[templateName].paramCountPerNumber[phoneNumberId] = item.parameterCount;
+      templateMap[templateName].hasImageHeaderPerNumber[phoneNumberId] = hasImageHeader;
 
       // If any number has MARKETING, mark overall as MARKETING
       if (item.category === "MARKETING") {

@@ -20,6 +20,7 @@ interface TemplateInfo {
   availableOn: string[];
   categoryPerNumber?: Record<string, string>;
   paramCountPerNumber?: Record<string, number>;
+  hasImageHeaderPerNumber?: Record<string, boolean>;
 }
 
 export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Props) {
@@ -90,6 +91,11 @@ export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Prop
     setMarketingNumbers(marketing);
     setSkippedNumbers([]);
 
+    // Track which numbers have image headers
+    const imageNumbers = selectedNumberIds.filter(
+      (id) => tpl.hasImageHeaderPerNumber?.[id] === true
+    );
+
     onUpdate({
       template: {
         templateName: tpl.templateName,
@@ -101,6 +107,7 @@ export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Prop
         lastSyncedAt: "",
       },
       templateMappings: {},
+      numbersWithImageHeader: imageNumbers,
     });
   };
 
