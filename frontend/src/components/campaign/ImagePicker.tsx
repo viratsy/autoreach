@@ -17,6 +17,42 @@ interface ImageFile {
   uploadedAt: string;
 }
 
+/**
+ * Compress image client-side using Canvas.
+ * Resizes to maxWidth and converts to JPEG with given quality.
+ */
+async function compressImage(file: File, maxWidth: number, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new window.Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      let width = img.width;
+      let height = img.height;
+
+      if (width > maxWidth) {
+        height = (height * maxWidth) / width;
+        width = maxWidth;
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error("Compression failed"));
+        },
+        "image/jpeg",
+        quality
+      );
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 export default function ImagePicker({ value, onChange }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<"upload" | "gallery" | "url">(value ? "url" : "gallery");
@@ -57,18 +93,21 @@ export default function ImagePicker({ value, onChange }: Props) {
 
     setUploading(true);
     try {
+      // Compress image client-side before upload
+      const compressed = await compressImage(file, 800, 0.75);
+
       const { uploadUrl, cdnUrl } = await apiRequest<{ uploadUrl: string; cdnUrl: string }>(
         "/campaigns/upload-image",
         {
           method: "POST",
-          body: JSON.stringify({ fileName: file.name, contentType: file.type }),
+          body: JSON.stringify({ fileName: file.name.replace(/\.[^.]+$/, ".jpg"), contentType: "image/jpeg" }),
         }
       );
 
       await fetch(uploadUrl, {
         method: "PUT",
-        body: file,
-        headers: { "Content-Type": file.type },
+        body: compressed,
+        headers: { "Content-Type": "image/jpeg" },
       });
 
       onChange(cdnUrl);
