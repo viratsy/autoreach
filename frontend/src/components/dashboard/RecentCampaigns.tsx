@@ -63,12 +63,23 @@ export default function RecentCampaigns({ campaigns }: Props) {
                 <td className="px-6 py-3 text-gray-600">{campaign.metrics?.read ?? "-"}</td>
                 <td className="px-6 py-3">
                   <div className="flex gap-2">
-                    <button className="text-primary-600 hover:text-primary-800 text-xs font-medium">
+                    <a href={`/campaigns/view/?id=${campaign.campaignId}`} className="text-primary-600 hover:text-primary-800 text-xs font-medium">
                       View
-                    </button>
-                    <button className="text-gray-500 hover:text-gray-700 text-xs font-medium">
+                    </a>
+                    <a
+                      href="#"
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        try {
+                          const { apiRequest } = await import("@/lib/api");
+                          await apiRequest(`/campaigns/${campaign.campaignId}/duplicate`, { method: "POST" });
+                          window.location.reload();
+                        } catch {}
+                      }}
+                      className="text-gray-500 hover:text-gray-700 text-xs font-medium"
+                    >
                       Duplicate
-                    </button>
+                    </a>
                   </div>
                 </td>
               </tr>
