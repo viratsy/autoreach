@@ -1,36 +1,36 @@
 import { Handler } from "aws-lambda";
-import { GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { SQSClient, SendMessageBatchCommand } from "@aws-sdk/client-sqs";
 import { docClient, TABLES } from "../../lib/dynamo";
-import { distributeContacts } from "../../lib/round-robin";
 import { CSVContact, CampaignRecord } from "../../lib/types";
 
 const s3 = new S3Client({});
+const sqs = new SQSClient({});
+const QUEUE_URL = process.env.SEND_QUEUE_URL!;
+const BATCH_SIZE = 200;
 
 /**
- * Triggered by EventBridge Scheduler at campaign schedule time.
- * Fetches CSV from S3, distributes contacts via round-robin,
- * sends messages through Meta API, and stores message records.
+ * Orchestrator: Triggered by EventBridge Scheduler.
+ * 1. Checks template category (aborts if MARKETING)
+ * 2. Reads CSV from S3
+ * 3. Distributes contacts round-robin across numbers
+ * 4. Pushes batches of 200 to SQS for parallel processing
  */
 export const handler: Handler = async (event) => {
-  console.log("Send handler invoked with:", JSON.stringify(event));
+  console.log("Send orchestrator invoked:", JSON.stringify(event));
 
   try {
-    // Handle both EventBridge (direct payload) and API Gateway (body) invocations
     const campaignId = event.campaignId || JSON.parse(event.body || "{}").campaignId;
-
     if (!campaignId) {
-      console.error("No campaignId in event");
-      return { statusCode: 400, body: "Missing campaignId" };
+      console.error("No campaignId");
+      return;
     }
-    // Get campaign record
-    const campaignResult = await docClient.send(
-      new GetCommand({
-        TableName: TABLES.CAMPAIGNS,
-        Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" },
-      })
-    );
 
+    // Get campaign
+    const campaignResult = await docClient.send(
+      new GetCommand({ TableName: TABLES.CAMPAIGNS, Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" } })
+    );
     const campaign = campaignResult.Item as CampaignRecord | undefined;
     if (!campaign) {
       console.error("Campaign not found:", campaignId);
@@ -40,97 +40,91 @@ export const handler: Handler = async (event) => {
     // Update status to running
     await updateCampaignStatus(campaignId, "running");
 
-    // Fetch business record for token
+    // Get business token
     const bizResult = await docClient.send(
-      new GetCommand({
-        TableName: TABLES.BUSINESSES,
-        Key: { PK: `BIZ#${campaign.businessId}`, SK: "METADATA" },
-      })
+      new GetCommand({ TableName: TABLES.BUSINESSES, Key: { PK: `BIZ#${campaign.businessId}`, SK: "METADATA" } })
     );
     const business = bizResult.Item;
-    const accessToken = business?.accessToken || process.env.META_ACCESS_TOKEN || "";
+    const accessToken = business?.accessToken || "";
 
-    // SAFETY CHECK: Verify template is still UTILITY before sending
-    // Fetch current template category from Meta API for the first number
+    // SAFETY: Check template category before sending
     const firstNumber = campaign.selectedNumbers[0];
-    if (firstNumber && accessToken) {
-      const wabaid = firstNumber.wabaid;
-      if (wabaid) {
-        try {
-          const tplResponse = await fetch(
-            `https://graph.facebook.com/v18.0/${wabaid}/message_templates?name=${campaign.templateName}&limit=1`,
-            { headers: { Authorization: `Bearer ${accessToken}` } }
-          );
-          const tplData = (await tplResponse.json()) as { data?: { category: string }[] };
-          const currentCategory = tplData.data?.[0]?.category;
-          if (currentCategory === "MARKETING") {
-            console.error(`STOPPED: Template "${campaign.templateName}" changed to MARKETING. Aborting campaign.`);
-            await updateCampaignStatus(campaignId, "failed");
-            return { error: "Template changed to MARKETING - campaign aborted" };
-          }
-        } catch (err) {
-          console.warn("Template category check failed, proceeding:", err);
-        }
-      }
-    }
-
-    // Fetch CSV from S3
-    const contacts = await fetchCSVFromS3(campaign.csvS3Key);
-
-    // Distribute contacts across numbers (round-robin)
-    const distributed = distributeContacts(contacts, campaign.selectedNumbers);
-
-    // Send messages
-    let sentCount = 0;
-    let failedCount = 0;
-
-    for (const { contact, assignedNumber } of distributed) {
+    if (firstNumber?.wabaid && accessToken) {
       try {
-        const metaMessageId = await sendWhatsAppMessage(
-          campaign,
-          contact,
-          assignedNumber.phoneNumberId,
-          accessToken
+        const tplRes = await fetch(
+          `https://graph.facebook.com/v18.0/${firstNumber.wabaid}/message_templates?name=${campaign.templateName}&limit=1`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
         );
-
-        // Store message record
-        await docClient.send(
-          new PutCommand({
-            TableName: TABLES.MESSAGES,
-            Item: {
-              PK: `CAMP#${campaignId}`,
-              SK: `MSG#${contact.phone}`,
-              GSI1PK: `METAMSG#${metaMessageId}`,
-              GSI1SK: `CAMP#${campaignId}`,
-              phoneNumber: contact.phone,
-              contactName: contact.name || "",
-              sendingNumberId: assignedNumber.phoneNumberId,
-              metaMessageId,
-              status: "sent",
-              repliedAt: null,
-              errorCode: null,
-              sentAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            },
-          })
-        );
-
-        sentCount++;
+        const tplData = (await tplRes.json()) as { data?: { category: string }[] };
+        if (tplData.data?.[0]?.category === "MARKETING") {
+          console.error(`ABORTED: Template "${campaign.templateName}" is now MARKETING`);
+          await updateCampaignStatus(campaignId, "failed");
+          return { error: "Template changed to MARKETING" };
+        }
       } catch (err) {
-        console.error(`Failed to send to ${contact.phone}:`, err);
-        failedCount++;
+        console.warn("Template check failed, proceeding:", err);
       }
     }
 
-    // Update campaign status
-    const finalStatus = failedCount === contacts.length ? "failed" : "completed";
-    await updateCampaignStatus(campaignId, finalStatus);
+    // Read CSV
+    const contacts = await fetchCSVFromS3(campaign.csvS3Key);
+    console.log(`Read ${contacts.length} contacts from CSV`);
 
-    console.log(`Campaign ${campaignId} completed: sent=${sentCount}, failed=${failedCount}`);
-    return { sent: sentCount, failed: failedCount };
+    // Distribute round-robin across numbers
+    const numberCount = campaign.selectedNumbers.length;
+    const batches: { contacts: CSVContact[]; phoneNumberId: string; displayName: string; wabaid?: string }[] = [];
+
+    // Group contacts by assigned number
+    const perNumber: Record<string, CSVContact[]> = {};
+    contacts.forEach((contact, i) => {
+      const number = campaign.selectedNumbers[i % numberCount];
+      if (!perNumber[number.phoneNumberId]) perNumber[number.phoneNumberId] = [];
+      perNumber[number.phoneNumberId].push(contact);
+    });
+
+    // Split each number's contacts into batches of BATCH_SIZE
+    for (const [phoneNumberId, numberContacts] of Object.entries(perNumber)) {
+      const number = campaign.selectedNumbers.find((n) => n.phoneNumberId === phoneNumberId);
+      for (let i = 0; i < numberContacts.length; i += BATCH_SIZE) {
+        batches.push({
+          contacts: numberContacts.slice(i, i + BATCH_SIZE),
+          phoneNumberId,
+          displayName: number?.displayName || "",
+          wabaid: (number as unknown as { wabaid?: string })?.wabaid,
+        });
+      }
+    }
+
+    console.log(`Created ${batches.length} batches for ${numberCount} numbers`);
+
+    // Push batches to SQS (max 10 per SendMessageBatch)
+    for (let i = 0; i < batches.length; i += 10) {
+      const chunk = batches.slice(i, i + 10);
+      await sqs.send(
+        new SendMessageBatchCommand({
+          QueueUrl: QUEUE_URL,
+          Entries: chunk.map((batch, idx) => ({
+            Id: `${i + idx}`,
+            MessageBody: JSON.stringify({
+              campaignId,
+              templateName: campaign.templateName,
+              templateMappings: campaign.templateMappings,
+              parameterMapping: campaign.parameterMapping,
+              headerImageUrl: (campaign as unknown as { headerImageUrl?: string }).headerImageUrl,
+              numbersWithImageHeader: (campaign as unknown as { numbersWithImageHeader?: string[] }).numbersWithImageHeader,
+              accessToken,
+              batch,
+            }),
+          })),
+        })
+      );
+    }
+
+    console.log(`Queued ${batches.length} batches to SQS`);
+    return { batches: batches.length, contacts: contacts.length };
   } catch (err) {
-    console.error("Campaign send error:", err);
-    return { error: "Campaign execution failed" };
+    console.error("Orchestrator error:", err);
+    return { error: "Orchestrator failed" };
   }
 };
 
@@ -152,12 +146,8 @@ async function updateCampaignStatus(campaignId: string, status: string) {
 
 async function fetchCSVFromS3(s3Key: string): Promise<CSVContact[]> {
   const result = await s3.send(
-    new GetObjectCommand({
-      Bucket: process.env.CSV_BUCKET!,
-      Key: s3Key,
-    })
+    new GetObjectCommand({ Bucket: process.env.CSV_BUCKET!, Key: s3Key })
   );
-
   const csvText = await result.Body!.transformToString();
   const lines = csvText.trim().split("\n");
   const headers = lines[0].split(",").map((h) => h.trim());
@@ -165,76 +155,8 @@ async function fetchCSVFromS3(s3Key: string): Promise<CSVContact[]> {
   return lines.slice(1).map((line) => {
     const values = line.split(",").map((v) => v.trim());
     const contact: CSVContact = { phone: "" };
-    headers.forEach((header, i) => {
-      contact[header] = values[i];
-    });
+    headers.forEach((header, i) => { contact[header] = values[i]; });
     contact.phone = contact.phone || "";
     return contact;
   });
-}
-
-async function sendWhatsAppMessage(
-  campaign: CampaignRecord,
-  contact: CSVContact,
-  phoneNumberId: string,
-  accessToken: string
-): Promise<string> {
-  // Build template parameters from mapping
-  const parameters = Object.entries(campaign.parameterMapping)
-    .sort(([a], [b]) => Number(a) - Number(b))
-    .map(([, csvHeaderOrStatic]) => {
-      if (csvHeaderOrStatic.startsWith("__STATIC__")) {
-        return { type: "text", text: csvHeaderOrStatic.replace("__STATIC__", "") };
-      }
-      return { type: "text", text: contact[csvHeaderOrStatic] || "" };
-    });
-
-  // Get the template name for this number (may be mapped differently)
-  const templateName =
-    campaign.templateMappings[phoneNumberId] || campaign.templateName;
-
-  // Build components
-  const components: unknown[] = [];
-
-  // Add header image only if this specific number needs it
-  const numbersWithImageHeader = (campaign as unknown as { numbersWithImageHeader?: string[] }).numbersWithImageHeader || [];
-  if ((campaign as unknown as { headerImageUrl?: string }).headerImageUrl && numbersWithImageHeader.includes(phoneNumberId)) {
-    components.push({
-      type: "header",
-      parameters: [{ type: "image", image: { link: (campaign as unknown as { headerImageUrl: string }).headerImageUrl } }],
-    });
-  }
-
-  // Add body parameters
-  if (parameters.length > 0) {
-    components.push({ type: "body", parameters });
-  }
-
-  const response = await fetch(
-    `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        to: contact.phone,
-        type: "template",
-        template: {
-          name: templateName,
-          language: { code: "en" },
-          components,
-        },
-      }),
-    }
-  );
-
-  const data = (await response.json()) as { messages: { id: string }[]; error?: unknown };
-  if (!response.ok) {
-    throw new Error(`Meta API error: ${JSON.stringify(data)}`);
-  }
-
-  return data.messages[0].id;
 }

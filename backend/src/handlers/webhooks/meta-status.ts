@@ -24,6 +24,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   // Process status updates (POST from Meta)
   try {
     const body = JSON.parse(event.body || "{}");
+    console.log("Webhook received:", JSON.stringify(body));
     const entries = body.entry || [];
 
     for (const entry of entries) {

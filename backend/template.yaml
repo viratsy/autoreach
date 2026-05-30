@@ -165,6 +165,23 @@ Resources:
         AttributeName: expiresAt
         Enabled: true
 
+  # --- SQS ---
+  SendQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "autoreach-send-${EnvName}"
+      VisibilityTimeout: 300
+      MessageRetentionPeriod: 86400
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt SendDLQ.Arn
+        maxReceiveCount: 3
+
+  SendDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "autoreach-send-dlq-${EnvName}"
+      MessageRetentionPeriod: 604800
+
   # --- S3 ---
   CSVBucket:
     Type: AWS::S3::Bucket
@@ -473,8 +490,11 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: dist/handlers/campaigns/send.handler
-      Timeout: 900
+      Timeout: 300
       MemorySize: 512
+      Environment:
+        Variables:
+          SEND_QUEUE_URL: !Ref SendQueue
       Policies:
         - S3ReadPolicy:
             BucketName: !Ref CSVBucket
@@ -482,8 +502,29 @@ Resources:
             TableName: !Ref BusinessesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CampaignsTable
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt SendQueue.QueueName
+
+  SendWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/send-worker.handler
+      Timeout: 300
+      MemorySize: 256
+      ReservedConcurrentExecutions: 5
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref MessagesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TemplatesTable
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt SendQueue.Arn
+            BatchSize: 1
 
   FetchTemplatesFunction:
     Type: AWS::Serverless::Function
