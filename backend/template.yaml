@@ -170,6 +170,11 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub "autoreach-csv-${EnvName}-${AWS::AccountId}"
+      LifecycleConfiguration:
+        Rules:
+          - Id: AutoDelete30Days
+            Status: Enabled
+            ExpirationInDays: 30
       CorsConfiguration:
         CorsRules:
           - AllowedHeaders: ["*"]
@@ -180,6 +185,42 @@ Resources:
               - "http://localhost:3000"
             ExposedHeaders: [ETag]
             MaxAge: 300
+
+  CSVBucketCDN:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt CSVBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          ForwardedValues:
+            QueryString: false
+          Compress: true
+          DefaultTTL: 86400
+        PriceClass: PriceClass_100
+
+  CSVBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CSVBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${CSVBucket.Arn}/images/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CSVBucketCDN}"
 
   # --- IAM Role for EventBridge Scheduler ---
   SchedulerRole:
@@ -337,6 +378,40 @@ Resources:
           Type: Api
           Properties:
             Path: /campaigns/file-preview
+            Method: GET
+
+  UploadImageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/upload-image.handler
+      Environment:
+        Variables:
+          CDN_URL: !Sub "https://${CSVBucketCDN.DomainName}"
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref CSVBucket
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/upload-image
+            Method: POST
+
+  ListImagesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/list-images.handler
+      Environment:
+        Variables:
+          CDN_URL: !Sub "https://${CSVBucketCDN.DomainName}"
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref CSVBucket
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/images
             Method: GET
 
   TestSendFunction:
