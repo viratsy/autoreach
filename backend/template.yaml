@@ -364,6 +364,8 @@ Resources:
         - S3ReadPolicy:
             BucketName: !Ref CSVBucket
         - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+        - DynamoDBCrudPolicy:
             TableName: !Ref CampaignsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref MessagesTable
