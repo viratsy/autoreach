@@ -71,6 +71,7 @@ function CampaignViewContent() {
   const [campaign, setCampaign] = useState<CampaignDetail | null>(null);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [messages, setMessages] = useState<MessageItem[]>([]);
+  const [cost, setCost] = useState<{ perMessage: number; total: number } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -82,10 +83,12 @@ function CampaignViewContent() {
       const data = await apiRequest<{
         campaign: CampaignDetail;
         metrics: Metrics;
+        cost: { perMessage: number; total: number };
         recentMessages: MessageItem[];
       }>(`/campaigns/${campaignId}`);
       setCampaign(data.campaign);
       setMetrics(data.metrics);
+      setCost(data.cost);
       setMessages(data.recentMessages);
     } catch {
     } finally {
@@ -147,6 +150,15 @@ function CampaignViewContent() {
                   <div><span className="text-gray-500">Numbers:</span> <span className="text-gray-900">{campaign.selectedNumbers?.length || 0}</span></div>
                   <div><span className="text-gray-500">Created:</span> <span className="text-gray-900">{new Date(campaign.createdAt).toLocaleString()}</span></div>
                 </div>
+                {cost && (
+                  <div className="mt-3 pt-3 border-t border-gray-200 flex items-center gap-4">
+                    <div>
+                      <p className="text-xs text-gray-500">Actual Cost (delivered)</p>
+                      <p className="text-lg font-bold text-gray-900">₹{cost.total.toFixed(2)}</p>
+                    </div>
+                    <p className="text-xs text-gray-400">₹{cost.perMessage}/msg × {metrics?.delivered || 0} delivered</p>
+                  </div>
+                )}
               </div>
 
               {messages.length > 0 && (

@@ -41,6 +41,7 @@ export default function ReviewSchedule({ draft, onUpdate, onBack }: Props) {
             businessName: draft.business!.businessName,
             selectedNumbers: draft.selectedNumbers,
             templateName: draft.template!.templateName,
+            templateCategory: draft.template!.category,
             templateMappings: draft.templateMappings,
             parameterMapping: draft.parameterMapping,
             headerImageUrl: draft.headerImageUrl || undefined,
@@ -118,6 +119,12 @@ export default function ReviewSchedule({ draft, onUpdate, onBack }: Props) {
           <span className="text-gray-900 font-medium">{draft.template?.templateName}</span>
         </div>
         <div className="flex justify-between">
+          <span className="text-gray-500">Category</span>
+          <span className={`font-medium ${draft.template?.category === "MARKETING" ? "text-red-600" : "text-green-600"}`}>
+            {draft.template?.category || "UTILITY"}
+          </span>
+        </div>
+        <div className="flex justify-between">
           <span className="text-gray-500">Parameters</span>
           <span className="text-gray-900 font-medium">{draft.template?.parameterCount} body params{draft.headerImageUrl ? " + image header" : ""}</span>
         </div>
@@ -130,6 +137,17 @@ export default function ReviewSchedule({ draft, onUpdate, onBack }: Props) {
           <span className="text-gray-900 font-medium">
             ~{Math.ceil(draft.csvRowCount / (draft.selectedNumbers.length || 1))} per number
           </span>
+        </div>
+        <div className="border-t border-gray-200 pt-2 mt-2">
+          <div className="flex justify-between">
+            <span className="text-gray-500">Estimated Cost</span>
+            <span className="text-gray-900 font-bold">
+              ₹{((draft.template?.category === "MARKETING" ? 0.78 : 0.30) * draft.csvRowCount).toFixed(2)}
+            </span>
+          </div>
+          <p className="text-xs text-gray-400 mt-1">
+            {draft.template?.category === "MARKETING" ? "₹0.78" : "₹0.30"}/msg × {draft.csvRowCount} contacts (charged on delivery)
+          </p>
         </div>
       </div>
 

@@ -50,6 +50,30 @@ export const handler: Handler = async (event) => {
     const business = bizResult.Item;
     const accessToken = business?.accessToken || process.env.META_ACCESS_TOKEN || "";
 
+    // SAFETY CHECK: Verify template is still UTILITY before sending
+    // Fetch current template category from Meta API for the first number
+    const firstNumber = campaign.selectedNumbers[0];
+    if (firstNumber && accessToken) {
+      const wabaid = firstNumber.wabaid;
+      if (wabaid) {
+        try {
+          const tplResponse = await fetch(
+            `https://graph.facebook.com/v18.0/${wabaid}/message_templates?name=${campaign.templateName}&limit=1`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          const tplData = (await tplResponse.json()) as { data?: { category: string }[] };
+          const currentCategory = tplData.data?.[0]?.category;
+          if (currentCategory === "MARKETING") {
+            console.error(`STOPPED: Template "${campaign.templateName}" changed to MARKETING. Aborting campaign.`);
+            await updateCampaignStatus(campaignId, "failed");
+            return { error: "Template changed to MARKETING - campaign aborted" };
+          }
+        } catch (err) {
+          console.warn("Template category check failed, proceeding:", err);
+        }
+      }
+    }
+
     // Fetch CSV from S3
     const contacts = await fetchCSVFromS3(campaign.csvS3Key);
 

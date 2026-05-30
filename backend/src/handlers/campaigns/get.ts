@@ -1,6 +1,7 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
 import { GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, TABLES } from "../../lib/dynamo";
+import { calculateActualCost } from "../../lib/pricing";
 import { success, error, options } from "../../lib/response";
 
 /**
@@ -60,6 +61,10 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         repliedAt: m.repliedAt,
       }));
 
+    // Calculate cost
+    const templateCategory = campaign.templateCategory || "utility";
+    const cost = calculateActualCost(metrics.delivered, templateCategory);
+
     return success({
       campaign: {
         campaignId: campaign.campaignId,
@@ -67,6 +72,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         businessName: campaign.businessName,
         selectedNumbers: campaign.selectedNumbers,
         templateName: campaign.templateName,
+        templateCategory,
         totalContacts: campaign.totalContacts,
         scheduleDate: campaign.scheduleDate,
         scheduleTime: campaign.scheduleTime,
@@ -74,6 +80,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         createdAt: campaign.createdAt,
       },
       metrics,
+      cost,
       recentMessages,
     }, origin);
   } catch (err) {

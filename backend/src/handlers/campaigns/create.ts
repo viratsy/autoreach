@@ -54,6 +54,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       businessName,
       selectedNumbers,
       templateName: templateName || "",
+      templateCategory: body.templateCategory || "UTILITY",
       templateMappings: templateMappings || {},
       parameterMapping: parameterMapping || {},
       csvS3Key: csvS3Key || "",
