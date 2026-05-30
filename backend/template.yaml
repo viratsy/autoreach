@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: AutoReach - WhatsApp Campaign Scheduler Backend v3
+Description: AutoReach - WhatsApp Campaign Scheduler Backend v4
 
 Globals:
   Function:
@@ -556,6 +556,23 @@ Resources:
           Properties:
             Path: /templates
             Method: GET
+
+  CopyTemplateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/templates/copy.handler
+      Timeout: 60
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TemplatesTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /templates/copy
+            Method: POST
 
   MetaWebhookFunction:
     Type: AWS::Serverless::Function
