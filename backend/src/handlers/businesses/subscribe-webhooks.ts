@@ -12,7 +12,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   if (event.httpMethod === "OPTIONS") return options(origin);
 
   try {
-    const { businessId } = JSON.parse(event.body || "{}");
+    const { businessId, targetWabaid } = JSON.parse(event.body || "{}");
     if (!businessId) return error(400, "businessId is required", origin);
 
     const bizResult = await docClient.send(
@@ -24,8 +24,13 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     const accessToken = business.accessToken;
     const phoneNumbers = business.phoneNumbers || [];
 
-    // Get unique WABAs
-    const wabaIds: string[] = [...new Set(phoneNumbers.map((pn: { wabaid: string }) => pn.wabaid).filter(Boolean))] as string[];
+    // Get WABAs to subscribe - either single target or all unique
+    let wabaIds: string[];
+    if (targetWabaid) {
+      wabaIds = [targetWabaid];
+    } else {
+      wabaIds = [...new Set(phoneNumbers.map((pn: { wabaid: string }) => pn.wabaid).filter(Boolean))] as string[];
+    }
 
     const results: { wabaid: string; status: string; error?: string }[] = [];
 
