@@ -12,6 +12,8 @@ export default function BusinessesPage() {
   const [loading, setLoading] = useState(true);
   const [subscribing, setSubscribing] = useState<Record<string, "idle" | "loading" | "success" | "error">>({});
   const [subscribeErrors, setSubscribeErrors] = useState<Record<string, string>>({});
+  const [qualityRatings, setQualityRatings] = useState<Record<string, { qualityRating: string; messagingLimit: string }>>({});
+  const [checkingQuality, setCheckingQuality] = useState<Record<string, boolean>>({});
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   useEffect(() => {
@@ -57,6 +59,38 @@ export default function BusinessesPage() {
     }
   };
 
+  const checkQuality = async (businessId: string, phoneNumberIds?: string[]) => {
+    const ids = phoneNumberIds || [];
+    ids.forEach((id) => setCheckingQuality((prev) => ({ ...prev, [id]: true })));
+    if (!ids.length) {
+      // Check all
+      businesses.forEach((biz) => {
+        if (biz.businessId === businessId) {
+          biz.phoneNumbers.forEach((pn) => setCheckingQuality((prev) => ({ ...prev, [pn.phoneNumberId]: true })));
+        }
+      });
+    }
+
+    try {
+      const data = await apiRequest<{ results: Record<string, { qualityRating: string; messagingLimit: string }> }>(
+        "/businesses/quality-check",
+        { method: "POST", body: JSON.stringify({ businessId, phoneNumberIds: ids.length ? ids : undefined }) }
+      );
+      setQualityRatings((prev) => ({ ...prev, ...data.results }));
+    } catch {
+      setToast({ message: "Quality check failed", type: "error" });
+    } finally {
+      ids.forEach((id) => setCheckingQuality((prev) => ({ ...prev, [id]: false })));
+      if (!ids.length) {
+        businesses.forEach((biz) => {
+          if (biz.businessId === businessId) {
+            biz.phoneNumbers.forEach((pn) => setCheckingQuality((prev) => ({ ...prev, [pn.phoneNumberId]: false })));
+          }
+        });
+      }
+    }
+  };
+
   return (
     <AuthGuard>
     <div className="flex h-screen">
@@ -76,12 +110,20 @@ export default function BusinessesPage() {
               <div key={biz.businessId} className="bg-white rounded-xl border border-gray-200 p-5">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-semibold text-gray-900 text-lg">{biz.businessName}</h3>
-                  <button
-                    onClick={() => subscribeAll(biz)}
-                    className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-100 font-medium"
-                  >
-                    Subscribe All WABAs
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => checkQuality(biz.businessId)}
+                      className="text-xs bg-green-50 text-green-700 px-3 py-1.5 rounded-lg hover:bg-green-100 font-medium"
+                    >
+                      Check All Quality
+                    </button>
+                    <button
+                      onClick={() => subscribeAll(biz)}
+                      className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg hover:bg-blue-100 font-medium"
+                    >
+                      Subscribe All WABAs
+                    </button>
+                  </div>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -102,20 +144,31 @@ export default function BusinessesPage() {
                           <td className="px-4 py-3 font-medium text-gray-900">{pn.displayName}</td>
                           <td className="px-4 py-3 text-gray-600">{pn.displayNumber}</td>
                           <td className="px-4 py-3">
-                            {(() => {
-                              const rating = (pn as unknown as { qualityRating?: string }).qualityRating;
-                              const colors: Record<string, string> = {
-                                GREEN: "bg-green-100 text-green-700",
-                                YELLOW: "bg-yellow-100 text-yellow-700",
-                                RED: "bg-red-100 text-red-700",
-                                UNKNOWN: "bg-gray-100 text-gray-500",
-                              };
-                              return (
-                                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${colors[rating || "UNKNOWN"]}`}>
-                                  {rating || "—"}
-                                </span>
-                              );
-                            })()}
+                            {checkingQuality[pn.phoneNumberId] ? (
+                              <span className="text-xs text-gray-400">Checking...</span>
+                            ) : qualityRatings[pn.phoneNumberId] ? (
+                              (() => {
+                                const rating = qualityRatings[pn.phoneNumberId].qualityRating;
+                                const colors: Record<string, string> = {
+                                  GREEN: "bg-green-100 text-green-700",
+                                  YELLOW: "bg-yellow-100 text-yellow-700",
+                                  RED: "bg-red-100 text-red-700",
+                                  UNKNOWN: "bg-gray-100 text-gray-500",
+                                };
+                                return (
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${colors[rating] || colors.UNKNOWN}`}>
+                                    {rating}
+                                  </span>
+                                );
+                              })()
+                            ) : (
+                              <button
+                                onClick={() => checkQuality(biz.businessId, [pn.phoneNumberId])}
+                                className="text-xs text-green-600 hover:text-green-700 font-medium"
+                              >
+                                Check
+                              </button>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-gray-400 text-xs font-mono">{pn.wabaid}</td>
                           <td className="px-4 py-3">

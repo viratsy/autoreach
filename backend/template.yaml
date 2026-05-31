@@ -335,6 +335,21 @@ Resources:
             Path: /businesses/subscribe-webhooks
             Method: POST
 
+  QualityCheckFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/businesses/quality-check.handler
+      Timeout: 30
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /businesses/quality-check
+            Method: POST
+
   CreateCampaignFunction:
     Type: AWS::Serverless::Function
     Properties:
