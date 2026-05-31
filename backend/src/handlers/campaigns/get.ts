@@ -37,14 +37,21 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     );
 
     const messages = messagesResult.Items || [];
+    // Metrics - cumulative (read includes delivered, delivered includes sent)
+    const failedCount = messages.filter((m) => m.status === "failed").length;
+    const sentOrBetter = messages.filter((m) => m.status !== "failed" && m.status !== "queued").length;
+    const deliveredOrBetter = messages.filter((m) => m.status === "delivered" || m.status === "read").length;
+    const readCount = messages.filter((m) => m.status === "read").length;
+    const repliedCount = messages.filter((m) => m.repliedAt).length;
+
     const metrics = {
       total: messages.length,
+      sent: sentOrBetter,
+      delivered: deliveredOrBetter,
+      read: readCount,
+      failed: failedCount,
+      replied: repliedCount,
       queued: messages.filter((m) => m.status === "queued").length,
-      sent: messages.filter((m) => m.status === "sent").length,
-      delivered: messages.filter((m) => m.status === "delivered").length,
-      read: messages.filter((m) => m.status === "read").length,
-      failed: messages.filter((m) => m.status === "failed").length,
-      replied: messages.filter((m) => m.repliedAt).length,
     };
 
     // Recent messages (last 50)

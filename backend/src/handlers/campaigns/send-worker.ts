@@ -171,5 +171,44 @@ export const handler: SQSHandler = async (event) => {
     }
 
     console.log(`Worker completed: ${contacts.length} messages processed for ${phoneNumberId}`);
+
+    // Check if all messages for this campaign are done
+    // Count total messages vs campaign totalContacts
+    try {
+      const { GetCommand: GetCmd, QueryCommand: QryCmd } = await import("@aws-sdk/lib-dynamodb");
+      const campResult = await docClient.send(
+        new GetCommand({ TableName: TABLES.CAMPAIGNS, Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" } })
+      );
+      const camp = campResult.Item;
+      if (camp && camp.status === "running") {
+        const msgCount = await docClient.send(
+          new (await import("@aws-sdk/lib-dynamodb")).QueryCommand({
+            TableName: TABLES.MESSAGES,
+            KeyConditionExpression: "PK = :pk",
+            ExpressionAttributeValues: { ":pk": `CAMP#${campaignId}` },
+            Select: "COUNT",
+          })
+        );
+        if ((msgCount.Count || 0) >= camp.totalContacts) {
+          await docClient.send(
+            new UpdateCommand({
+              TableName: TABLES.CAMPAIGNS,
+              Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" },
+              UpdateExpression: "SET #status = :status, GSI2PK = :gsi2pk, updatedAt = :now",
+              ExpressionAttributeNames: { "#status": "status" },
+              ExpressionAttributeValues: {
+                ":status": "completed",
+                ":gsi2pk": "STATUS#completed",
+                ":now": new Date().toISOString(),
+              },
+            })
+          );
+          console.log(`Campaign ${campaignId} marked as completed`);
+        }
+      }
+    } catch (err) {
+      // Non-critical - status will be updated on next batch
+      console.warn("Status update check failed:", err);
+    }
   }
 };
