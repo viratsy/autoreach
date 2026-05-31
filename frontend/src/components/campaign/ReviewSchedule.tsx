@@ -50,6 +50,7 @@ export default function ReviewSchedule({ draft, onUpdate, onBack }: Props) {
             totalContacts: draft.csvRowCount,
             scheduleDate: draft.scheduleDate,
             scheduleTime: draft.scheduleTime,
+            failureMode: draft.failureMode,
           }),
         }
       );
@@ -101,6 +102,41 @@ export default function ReviewSchedule({ draft, onUpdate, onBack }: Props) {
             onChange={(e) => onUpdate({ scheduleTime: e.target.value })}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
           />
+        </div>
+      </div>
+
+      {/* Failure Handling */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-gray-700 mb-2">If a number becomes MARKETING or fails</label>
+        <div className="flex gap-3">
+          <label className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:border-primary-300 flex-1">
+            <input
+              type="radio"
+              name="failureMode"
+              value="reroute"
+              checked={(draft as unknown as { failureMode?: string }).failureMode !== "skip"}
+              onChange={() => onUpdate({ failureMode: "reroute" } as unknown as Partial<CampaignDraft>)}
+              className="w-4 h-4 text-primary-600"
+            />
+            <div>
+              <p className="text-sm font-medium text-gray-900">Reroute</p>
+              <p className="text-xs text-gray-500">Send from other healthy numbers</p>
+            </div>
+          </label>
+          <label className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:border-primary-300 flex-1">
+            <input
+              type="radio"
+              name="failureMode"
+              value="skip"
+              checked={(draft as unknown as { failureMode?: string }).failureMode === "skip"}
+              onChange={() => onUpdate({ failureMode: "skip" } as unknown as Partial<CampaignDraft>)}
+              className="w-4 h-4 text-primary-600"
+            />
+            <div>
+              <p className="text-sm font-medium text-gray-900">Skip</p>
+              <p className="text-xs text-gray-500">Don&apos;t send those contacts</p>
+            </div>
+          </label>
         </div>
       </div>
 

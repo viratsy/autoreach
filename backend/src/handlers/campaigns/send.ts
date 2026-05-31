@@ -47,44 +47,67 @@ export const handler: Handler = async (event) => {
     const business = bizResult.Item;
     const accessToken = business?.accessToken || "";
 
-    // SAFETY: Check template category before sending
-    const firstNumber = campaign.selectedNumbers[0];
-    if (firstNumber?.wabaid && accessToken) {
-      try {
-        const tplRes = await fetch(
-          `https://graph.facebook.com/v25.0/${firstNumber.wabaid}/message_templates?name=${campaign.templateName}&limit=1`,
-          { headers: { Authorization: `Bearer ${accessToken}` } }
-        );
-        const tplData = (await tplRes.json()) as { data?: { category: string }[] };
-        if (tplData.data?.[0]?.category === "MARKETING") {
-          console.error(`ABORTED: Template "${campaign.templateName}" is now MARKETING`);
-          await updateCampaignStatus(campaignId, "failed");
-          return { error: "Template changed to MARKETING" };
+    // SAFETY: Check template category on ALL numbers before sending
+    const healthyNumbers: typeof campaign.selectedNumbers = [];
+    const marketingNumbers: string[] = [];
+
+    for (const number of campaign.selectedNumbers) {
+      const wabaid = (number as unknown as { wabaid?: string })?.wabaid;
+      if (wabaid && accessToken) {
+        try {
+          const tplRes = await fetch(
+            `https://graph.facebook.com/v25.0/${wabaid}/message_templates?name=${campaign.templateName}&limit=1`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          const tplData = (await tplRes.json()) as { data?: { category: string }[] };
+          if (tplData.data?.[0]?.category === "MARKETING") {
+            marketingNumbers.push(number.phoneNumberId);
+            console.log(`Number ${number.phoneNumberId} has MARKETING template`);
+          } else {
+            healthyNumbers.push(number);
+          }
+        } catch {
+          healthyNumbers.push(number); // If check fails, assume healthy
         }
-      } catch (err) {
-        console.warn("Template check failed, proceeding:", err);
+      } else {
+        healthyNumbers.push(number);
       }
     }
+
+    const failureMode = (campaign as unknown as { failureMode?: string }).failureMode || "reroute";
+
+    if (healthyNumbers.length === 0) {
+      console.error("ABORTED: All numbers have MARKETING template");
+      await updateCampaignStatus(campaignId, "failed");
+      return { error: "All numbers have MARKETING template" };
+    }
+
+    if (marketingNumbers.length > 0) {
+      console.log(`${marketingNumbers.length} numbers are MARKETING. Mode: ${failureMode}. Using ${healthyNumbers.length} healthy numbers.`);
+    }
+
+    // Use only healthy numbers for distribution
+    const activeNumbers = healthyNumbers;
 
     // Read CSV
     const contacts = await fetchCSVFromS3(campaign.csvS3Key);
     console.log(`Read ${contacts.length} contacts from CSV`);
 
-    // Distribute round-robin across numbers
-    const numberCount = campaign.selectedNumbers.length;
+    // Distribute round-robin across healthy numbers only
+    const numberCount = activeNumbers.length;
     const batches: { contacts: CSVContact[]; phoneNumberId: string; displayName: string; wabaid?: string }[] = [];
 
     // Group contacts by assigned number
     const perNumber: Record<string, CSVContact[]> = {};
     contacts.forEach((contact, i) => {
-      const number = campaign.selectedNumbers[i % numberCount];
+      const number = activeNumbers[i % numberCount];
       if (!perNumber[number.phoneNumberId]) perNumber[number.phoneNumberId] = [];
       perNumber[number.phoneNumberId].push(contact);
     });
 
     // Split each number's contacts into batches of BATCH_SIZE
     for (const [phoneNumberId, numberContacts] of Object.entries(perNumber)) {
-      const number = campaign.selectedNumbers.find((n) => n.phoneNumberId === phoneNumberId);
+      const number = activeNumbers.find((n) => n.phoneNumberId === phoneNumberId);
       for (let i = 0; i < numberContacts.length; i += BATCH_SIZE) {
         batches.push({
           contacts: numberContacts.slice(i, i + BATCH_SIZE),

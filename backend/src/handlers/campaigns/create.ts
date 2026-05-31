@@ -60,6 +60,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       csvS3Key: csvS3Key || "",
       headerImageUrl: headerImageUrl || "",
       numbersWithImageHeader: numbersWithImageHeader || [],
+      failureMode: body.failureMode || "reroute",
       totalContacts: totalContacts || 0,
       scheduleDate: scheduleDate || "",
       scheduleTime: scheduleTime || "",

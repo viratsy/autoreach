@@ -43,6 +43,7 @@ export interface CampaignRecord {
   headerImageUrl?: string;
   numbersWithImageHeader?: string[];
   templateCategory?: string;
+  failureMode?: string;
   totalContacts: number;
   scheduleDate: string;
   scheduleTime: string;
