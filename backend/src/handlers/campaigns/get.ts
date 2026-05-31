@@ -38,6 +38,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
     const messages = messagesResult.Items || [];
     // Metrics - cumulative (read includes delivered, delivered includes sent)
+    // v2: fixed cumulative counting
     const failedCount = messages.filter((m) => m.status === "failed").length;
     const sentOrBetter = messages.filter((m) => m.status !== "failed" && m.status !== "queued").length;
     const deliveredOrBetter = messages.filter((m) => m.status === "delivered" || m.status === "read").length;
