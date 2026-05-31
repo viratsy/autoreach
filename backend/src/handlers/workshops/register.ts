@@ -58,7 +58,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     const item = {
       PK: `PHONE#${digits}`,
       SK: `WS#${wsCode}`,
-      GSI1PK: "STATUS#active",
+      GSI1PK: "STATUS#waiting",
       GSI1SK: `WS#${wsCode}#PHONE#${digits}`,
       name: name || "",
       phone: digits,
@@ -66,7 +66,8 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       workshopName: workshop_name,
       wsCode,
       counter: 0,
-      status: "active",
+      status: "waiting",
+      firstBatchDate: body.workshop_date || "",
       lastBatchDate: "",
       registeredAt: now,
     };
