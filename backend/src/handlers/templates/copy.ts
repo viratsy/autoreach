@@ -72,12 +72,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       }
 
       try {
-        // Clean components for submission (remove example data that Meta doesn't accept on create)
-        const cleanComponents = (templateStructure.components as { type: string; [key: string]: unknown }[]).map((comp) => {
-          const { example, ...rest } = comp as { example?: unknown; [key: string]: unknown };
-          return rest;
-        });
-
+        // Submit components as-is (including examples for approval)
         const createRes = await fetch(
           `https://graph.facebook.com/v25.0/${targetWabaid}/message_templates`,
           {
@@ -90,7 +85,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
               name: templateStructure.name,
               category: templateStructure.category,
               language: templateStructure.language,
-              components: cleanComponents,
+              components: templateStructure.components,
             }),
           }
         );
