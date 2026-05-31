@@ -61,6 +61,8 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       headerImageUrl: headerImageUrl || "",
       numbersWithImageHeader: numbersWithImageHeader || [],
       failureMode: body.failureMode || "reroute",
+      autoRetry: body.autoRetry !== false,
+      retryCount: 0,
       totalContacts: totalContacts || 0,
       scheduleDate: scheduleDate || "",
       scheduleTime: scheduleTime || "",

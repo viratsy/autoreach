@@ -566,6 +566,9 @@ Resources:
       Timeout: 300
       MemorySize: 256
       ReservedConcurrentExecutions: 5
+      Environment:
+        Variables:
+          RETRY_FUNCTION_NAME: !Ref RetryFailedFunction
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref CampaignsTable
@@ -573,12 +576,38 @@ Resources:
             TableName: !Ref MessagesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref TemplatesTable
+        - LambdaInvokePolicy:
+            FunctionName: !Ref RetryFailedFunction
       Events:
         SQSEvent:
           Type: SQS
           Properties:
             Queue: !GetAtt SendQueue.Arn
             BatchSize: 1
+
+  RetryFailedFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/retry-failed.handler
+      Timeout: 120
+      Environment:
+        Variables:
+          SEND_QUEUE_URL: !Ref SendQueue
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt SendQueue.QueueName
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/{campaignId}/retry
+            Method: POST
 
   FetchTemplatesFunction:
     Type: AWS::Serverless::Function

@@ -173,16 +173,15 @@ export const handler: SQSHandler = async (event) => {
     console.log(`Worker completed: ${contacts.length} messages processed for ${phoneNumberId}`);
 
     // Check if all messages for this campaign are done
-    // Count total messages vs campaign totalContacts
     try {
-      const { GetCommand: GetCmd, QueryCommand: QryCmd } = await import("@aws-sdk/lib-dynamodb");
       const campResult = await docClient.send(
         new GetCommand({ TableName: TABLES.CAMPAIGNS, Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" } })
       );
       const camp = campResult.Item;
       if (camp && camp.status === "running") {
+        const { QueryCommand: QCmd } = await import("@aws-sdk/lib-dynamodb");
         const msgCount = await docClient.send(
-          new (await import("@aws-sdk/lib-dynamodb")).QueryCommand({
+          new QCmd({
             TableName: TABLES.MESSAGES,
             KeyConditionExpression: "PK = :pk",
             ExpressionAttributeValues: { ":pk": `CAMP#${campaignId}` },
@@ -190,25 +189,49 @@ export const handler: SQSHandler = async (event) => {
           })
         );
         if ((msgCount.Count || 0) >= camp.totalContacts) {
-          await docClient.send(
-            new UpdateCommand({
+          // Check for failed messages
+          const failedResult = await docClient.send(
+            new QCmd({
+              TableName: TABLES.MESSAGES,
+              KeyConditionExpression: "PK = :pk",
+              FilterExpression: "#s = :failed",
+              ExpressionAttributeNames: { "#s": "status" },
+              ExpressionAttributeValues: { ":pk": `CAMP#${campaignId}`, ":failed": "failed" },
+              Select: "COUNT",
+            })
+          );
+          const failedCount = failedResult.Count || 0;
+
+          if (camp.autoRetry && failedCount > 0 && (camp.retryCount || 0) === 0) {
+            console.log(`Auto-retry: ${failedCount} failed in campaign ${campaignId}`);
+            // Invoke retry function asynchronously
+            const { LambdaClient, InvokeCommand } = await import("@aws-sdk/client-lambda");
+            const lambda = new LambdaClient({});
+            await lambda.send(new InvokeCommand({
+              FunctionName: process.env.RETRY_FUNCTION_NAME || "",
+              InvocationType: "Event",
+              Payload: Buffer.from(JSON.stringify({ httpMethod: "POST", pathParameters: { campaignId }, headers: {}, body: "{}" })),
+            }));
+            await docClient.send(new UpdateCommand({
+              TableName: TABLES.CAMPAIGNS,
+              Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" },
+              UpdateExpression: "SET retryCount = :rc, updatedAt = :now",
+              ExpressionAttributeValues: { ":rc": 1, ":now": new Date().toISOString() },
+            }));
+          } else {
+            await docClient.send(new UpdateCommand({
               TableName: TABLES.CAMPAIGNS,
               Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" },
               UpdateExpression: "SET #status = :status, GSI2PK = :gsi2pk, updatedAt = :now",
               ExpressionAttributeNames: { "#status": "status" },
-              ExpressionAttributeValues: {
-                ":status": "completed",
-                ":gsi2pk": "STATUS#completed",
-                ":now": new Date().toISOString(),
-              },
-            })
-          );
-          console.log(`Campaign ${campaignId} marked as completed`);
+              ExpressionAttributeValues: { ":status": "completed", ":gsi2pk": "STATUS#completed", ":now": new Date().toISOString() },
+            }));
+            console.log(`Campaign ${campaignId} completed`);
+          }
         }
       }
     } catch (err) {
-      // Non-critical - status will be updated on next batch
-      console.warn("Status update check failed:", err);
+      console.warn("Status check:", err);
     }
   }
 };

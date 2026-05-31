@@ -39,6 +39,7 @@ export interface CampaignDraft {
   scheduleDate: string;
   scheduleTime: string;
   failureMode: string;
+  autoRetry: boolean;
 }
 
 const initialDraft: CampaignDraft = {
@@ -57,6 +58,7 @@ const initialDraft: CampaignDraft = {
   scheduleDate: "",
   scheduleTime: "",
   failureMode: "reroute",
+  autoRetry: true,
 };
 
 export default function NewCampaignPage() {

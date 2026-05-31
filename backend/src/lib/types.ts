@@ -44,6 +44,8 @@ export interface CampaignRecord {
   numbersWithImageHeader?: string[];
   templateCategory?: string;
   failureMode?: string;
+  autoRetry?: boolean;
+  retryCount?: number;
   totalContacts: number;
   scheduleDate: string;
   scheduleTime: string;

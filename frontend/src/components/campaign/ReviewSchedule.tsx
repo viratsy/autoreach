@@ -51,6 +51,7 @@ export default function ReviewSchedule({ draft, onUpdate, onBack }: Props) {
             scheduleDate: draft.scheduleDate,
             scheduleTime: draft.scheduleTime,
             failureMode: draft.failureMode,
+            autoRetry: draft.autoRetry,
           }),
         }
       );
@@ -105,38 +106,55 @@ export default function ReviewSchedule({ draft, onUpdate, onBack }: Props) {
         </div>
       </div>
 
-      {/* Failure Handling */}
-      <div className="mb-6">
-        <label className="block text-sm font-medium text-gray-700 mb-2">If a number becomes MARKETING or fails</label>
-        <div className="flex gap-3">
-          <label className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:border-primary-300 flex-1">
+      {/* Auto-retry & Failure Handling */}
+      <div className="mb-6 space-y-4">
+        <div>
+          <label className="flex items-center gap-3 cursor-pointer">
             <input
-              type="radio"
-              name="failureMode"
-              value="reroute"
-              checked={(draft as unknown as { failureMode?: string }).failureMode !== "skip"}
-              onChange={() => onUpdate({ failureMode: "reroute" } as unknown as Partial<CampaignDraft>)}
-              className="w-4 h-4 text-primary-600"
+              type="checkbox"
+              checked={(draft as unknown as { autoRetry?: boolean }).autoRetry !== false}
+              onChange={(e) => onUpdate({ autoRetry: e.target.checked } as unknown as Partial<CampaignDraft>)}
+              className="w-4 h-4 text-primary-600 rounded"
             />
             <div>
-              <p className="text-sm font-medium text-gray-900">Reroute</p>
-              <p className="text-xs text-gray-500">Send from other healthy numbers</p>
+              <p className="text-sm font-medium text-gray-900">Auto-retry failed messages</p>
+              <p className="text-xs text-gray-500">Automatically reroute failed contacts to other healthy numbers after campaign completes</p>
             </div>
           </label>
-          <label className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:border-primary-300 flex-1">
-            <input
-              type="radio"
-              name="failureMode"
-              value="skip"
-              checked={(draft as unknown as { failureMode?: string }).failureMode === "skip"}
-              onChange={() => onUpdate({ failureMode: "skip" } as unknown as Partial<CampaignDraft>)}
-              className="w-4 h-4 text-primary-600"
-            />
-            <div>
-              <p className="text-sm font-medium text-gray-900">Skip</p>
-              <p className="text-xs text-gray-500">Don&apos;t send those contacts</p>
-            </div>
-          </label>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">If a number becomes MARKETING</label>
+          <div className="flex gap-3">
+            <label className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:border-primary-300 flex-1">
+              <input
+                type="radio"
+                name="failureMode"
+                value="reroute"
+                checked={(draft as unknown as { failureMode?: string }).failureMode !== "skip"}
+                onChange={() => onUpdate({ failureMode: "reroute" } as unknown as Partial<CampaignDraft>)}
+                className="w-4 h-4 text-primary-600"
+              />
+              <div>
+                <p className="text-sm font-medium text-gray-900">Reroute</p>
+                <p className="text-xs text-gray-500">Send from other healthy numbers</p>
+              </div>
+            </label>
+            <label className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:border-primary-300 flex-1">
+              <input
+                type="radio"
+                name="failureMode"
+                value="skip"
+                checked={(draft as unknown as { failureMode?: string }).failureMode === "skip"}
+                onChange={() => onUpdate({ failureMode: "skip" } as unknown as Partial<CampaignDraft>)}
+                className="w-4 h-4 text-primary-600"
+              />
+              <div>
+                <p className="text-sm font-medium text-gray-900">Skip</p>
+                <p className="text-xs text-gray-500">Don&apos;t send those contacts</p>
+              </div>
+            </label>
+          </div>
         </div>
       </div>
 
