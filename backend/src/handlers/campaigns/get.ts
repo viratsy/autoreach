@@ -51,15 +51,20 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     const recentMessages = messages
       .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))
       .slice(0, 50)
-      .map((m) => ({
-        phone: m.phoneNumber,
-        name: m.contactName,
-        status: m.status,
-        sendingNumber: m.sendingNumberId,
-        errorCode: m.errorCode,
-        sentAt: m.sentAt,
-        repliedAt: m.repliedAt,
-      }));
+      .map((m) => {
+        const sendingNum = campaign.selectedNumbers?.find(
+          (n: { phoneNumberId: string }) => n.phoneNumberId === m.sendingNumberId
+        );
+        return {
+          phone: m.phoneNumber,
+          name: m.contactName,
+          status: m.status,
+          sendingNumber: sendingNum?.displayName || m.sendingNumberId || "-",
+          errorCode: m.errorCode,
+          sentAt: m.sentAt,
+          repliedAt: m.repliedAt,
+        };
+      });
 
     // Calculate cost
     const templateCategory = campaign.templateCategory || "utility";

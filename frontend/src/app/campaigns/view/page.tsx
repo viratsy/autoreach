@@ -40,6 +40,28 @@ interface MessageItem {
   repliedAt: string | null;
 }
 
+const ERROR_MESSAGES: Record<string, string> = {
+  "131042": "Payment issue on sending account",
+  "131047": "Re-engagement message required (24hr window expired)",
+  "131026": "Message undeliverable (number not on WhatsApp)",
+  "131051": "Unsupported message type",
+  "131053": "Media upload error",
+  "132000": "Template parameter count mismatch",
+  "132001": "Template does not exist",
+  "132005": "Template hydration failed",
+  "132012": "Template parameter format mismatch",
+  "132015": "Template paused",
+  "132016": "Template disabled",
+  "133010": "Phone number not registered",
+  "130429": "Rate limit hit",
+  "131056": "Pair rate limit hit",
+  "368": "Temporarily blocked for policy violations",
+};
+
+function getErrorMessage(code: string): string {
+  return ERROR_MESSAGES[code] || `Error ${code}`;
+}
+
 const statusColors: Record<string, string> = {
   draft: "bg-gray-100 text-gray-700",
   scheduled: "bg-yellow-100 text-yellow-700",
@@ -172,6 +194,7 @@ function CampaignViewContent() {
                         <tr>
                           <th className="text-left px-5 py-2 font-medium">Phone</th>
                           <th className="text-left px-5 py-2 font-medium">Name</th>
+                          <th className="text-left px-5 py-2 font-medium">Sent From</th>
                           <th className="text-left px-5 py-2 font-medium">Status</th>
                           <th className="text-left px-5 py-2 font-medium">Sent At</th>
                           <th className="text-left px-5 py-2 font-medium">Replied</th>
@@ -182,8 +205,9 @@ function CampaignViewContent() {
                           <tr key={i} className="hover:bg-gray-50">
                             <td className="px-5 py-2 text-gray-900">{msg.phone}</td>
                             <td className="px-5 py-2 text-gray-600">{msg.name || "-"}</td>
+                            <td className="px-5 py-2 text-gray-500 text-xs">{msg.sendingNumber || "-"}</td>
                             <td className={`px-5 py-2 font-medium ${msgStatusColors[msg.status] || "text-gray-500"}`}>
-                              {msg.status}{msg.errorCode ? ` (${msg.errorCode})` : ""}
+                              {msg.status}{msg.errorCode ? ` — ${getErrorMessage(msg.errorCode)}` : ""}
                             </td>
                             <td className="px-5 py-2 text-gray-500">{msg.sentAt ? new Date(msg.sentAt).toLocaleTimeString() : "-"}</td>
                             <td className="px-5 py-2 text-gray-500">{msg.repliedAt ? "Yes" : "-"}</td>
