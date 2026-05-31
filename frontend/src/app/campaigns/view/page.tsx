@@ -147,22 +147,31 @@ function CampaignViewContent() {
               {metrics && (
                 <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
                   {(() => {
-                    // Calculate cumulative metrics client-side
+                    // Raw counts from API - backend counts each status exclusively
                     const total = metrics.total;
                     const failed = metrics.failed;
-                    const sent = total - failed - metrics.queued; // everything that was sent
-                    const delivered = metrics.delivered + metrics.read; // delivered includes read
+                    const queued = metrics.queued;
+                    
+                    // Cumulative: sent = everything not failed/queued
+                    const sent = total - failed - queued;
+                    // If backend already returns cumulative delivered (includes read), use as-is
+                    // If backend returns exclusive counts, add them up
+                    // Check: if delivered + read + failed + queued + sent_only > total, backend is cumulative
+                    const delivered = metrics.delivered > metrics.read ? metrics.delivered : metrics.delivered + metrics.read;
                     const read = metrics.read;
                     const replied = metrics.replied;
+
+                    // Ensure delivered doesn't exceed sent
+                    const safeDelivered = Math.min(delivered, sent);
 
                     const items = [
                       { label: "Total", value: total, icon: Send, color: "text-gray-600", pct: null as number | null },
                       { label: "Sent", value: sent, icon: Send, color: "text-blue-600", pct: total ? Math.round((sent / total) * 100) : 0 },
-                      { label: "Delivered", value: delivered, icon: CheckCircle, color: "text-green-600", pct: sent ? Math.round((delivered / sent) * 100) : 0 },
-                      { label: "Read", value: read, icon: Eye, color: "text-purple-600", pct: delivered ? Math.round((read / delivered) * 100) : 0 },
+                      { label: "Delivered", value: safeDelivered, icon: CheckCircle, color: "text-green-600", pct: sent ? Math.round((safeDelivered / sent) * 100) : 0 },
+                      { label: "Read", value: read, icon: Eye, color: "text-purple-600", pct: safeDelivered ? Math.round((read / safeDelivered) * 100) : 0 },
                       { label: "Failed", value: failed, icon: XCircle, color: "text-red-600", pct: total ? Math.round((failed / total) * 100) : 0 },
-                      { label: "Replied", value: replied, icon: MessageSquare, color: "text-indigo-600", pct: delivered ? Math.round((replied / delivered) * 100) : 0 },
-                      { label: "Queued", value: metrics.queued, icon: Send, color: "text-gray-400", pct: null },
+                      { label: "Replied", value: replied, icon: MessageSquare, color: "text-indigo-600", pct: safeDelivered ? Math.round((replied / safeDelivered) * 100) : 0 },
+                      { label: "Queued", value: queued, icon: Send, color: "text-gray-400", pct: null },
                     ];
 
                     return items.map((m) => (
