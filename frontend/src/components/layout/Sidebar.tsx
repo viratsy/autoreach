@@ -8,6 +8,7 @@ import {
   PlusCircle,
   LogOut,
   FileText,
+  CalendarClock,
 } from "lucide-react";
 import { logout, getCurrentEmail } from "@/lib/api";
 
@@ -15,6 +16,7 @@ const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/campaigns/", label: "Campaigns", icon: Send },
   { href: "/campaigns/new/", label: "New Campaign", icon: PlusCircle },
+  { href: "/workshops/", label: "Workshops", icon: CalendarClock },
   { href: "/templates/", label: "Templates", icon: FileText },
   { href: "/businesses/", label: "Businesses", icon: Building2 },
 ];
