@@ -30,7 +30,7 @@ export const handler: Handler = async () => {
 
         try {
           const response = await fetch(
-            `https://graph.facebook.com/v18.0/${wabaid}/message_templates?limit=100`,
+            `https://graph.facebook.com/v25.0/${wabaid}/message_templates?limit=100`,
             { headers: { Authorization: `Bearer ${accessToken}` } }
           );
 

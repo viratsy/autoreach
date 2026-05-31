@@ -65,7 +65,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         console.log(`Sending to ${number.phoneNumberId}:`, JSON.stringify(requestBody));
 
         const response = await fetch(
-          `https://graph.facebook.com/v18.0/${number.phoneNumberId}/messages`,
+          `https://graph.facebook.com/v25.0/${number.phoneNumberId}/messages`,
           {
             method: "POST",
             headers: {

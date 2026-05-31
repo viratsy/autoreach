@@ -43,7 +43,7 @@ export const handler: SQSHandler = async (event) => {
     if (wabaid && accessToken) {
       try {
         const res = await fetch(
-          `https://graph.facebook.com/v18.0/${wabaid}/message_templates?name=${templateName}&limit=1`,
+          `https://graph.facebook.com/v25.0/${wabaid}/message_templates?name=${templateName}&limit=1`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
         const data = (await res.json()) as { data?: { category: string }[] };
@@ -100,7 +100,7 @@ export const handler: SQSHandler = async (event) => {
 
         // Send via Meta API
         const response = await fetch(
-          `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+          `https://graph.facebook.com/v25.0/${phoneNumberId}/messages`,
           {
             method: "POST",
             headers: {

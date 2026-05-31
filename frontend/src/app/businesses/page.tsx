@@ -90,6 +90,7 @@ export default function BusinessesPage() {
                       <tr>
                         <th className="text-left px-4 py-2 font-medium">Name</th>
                         <th className="text-left px-4 py-2 font-medium">Number</th>
+                        <th className="text-left px-4 py-2 font-medium">Quality</th>
                         <th className="text-left px-4 py-2 font-medium">WABA ID</th>
                         <th className="text-left px-4 py-2 font-medium">Webhook</th>
                         <th className="text-left px-4 py-2 font-medium">Links</th>
@@ -100,6 +101,22 @@ export default function BusinessesPage() {
                         <tr key={pn.phoneNumberId} className="hover:bg-gray-50">
                           <td className="px-4 py-3 font-medium text-gray-900">{pn.displayName}</td>
                           <td className="px-4 py-3 text-gray-600">{pn.displayNumber}</td>
+                          <td className="px-4 py-3">
+                            {(() => {
+                              const rating = (pn as unknown as { qualityRating?: string }).qualityRating;
+                              const colors: Record<string, string> = {
+                                GREEN: "bg-green-100 text-green-700",
+                                YELLOW: "bg-yellow-100 text-yellow-700",
+                                RED: "bg-red-100 text-red-700",
+                                UNKNOWN: "bg-gray-100 text-gray-500",
+                              };
+                              return (
+                                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${colors[rating || "UNKNOWN"]}`}>
+                                  {rating || "—"}
+                                </span>
+                              );
+                            })()}
+                          </td>
                           <td className="px-4 py-3 text-gray-400 text-xs font-mono">{pn.wabaid}</td>
                           <td className="px-4 py-3">
                             {subscribing[pn.wabaid] === "loading" ? (

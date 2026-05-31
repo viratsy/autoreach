@@ -50,7 +50,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
     if (sourceWabaid) {
       const res = await fetch(
-        `https://graph.facebook.com/v18.0/${sourceWabaid}/message_templates?name=${templateName}&limit=1`,
+        `https://graph.facebook.com/v25.0/${sourceWabaid}/message_templates?name=${templateName}&limit=1`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
       );
       const data = (await res.json()) as { data?: { name: string; category: string; language: string; components: unknown[] }[] };
@@ -79,7 +79,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         });
 
         const createRes = await fetch(
-          `https://graph.facebook.com/v18.0/${targetWabaid}/message_templates`,
+          `https://graph.facebook.com/v25.0/${targetWabaid}/message_templates`,
           {
             method: "POST",
             headers: {

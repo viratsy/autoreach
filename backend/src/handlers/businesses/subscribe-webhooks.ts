@@ -37,7 +37,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     for (const wabaid of wabaIds) {
       try {
         const res = await fetch(
-          `https://graph.facebook.com/v18.0/${wabaid}/subscribed_apps`,
+          `https://graph.facebook.com/v25.0/${wabaid}/subscribed_apps`,
           {
             method: "POST",
             headers: {

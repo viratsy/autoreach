@@ -52,7 +52,7 @@ export const handler: Handler = async (event) => {
     if (firstNumber?.wabaid && accessToken) {
       try {
         const tplRes = await fetch(
-          `https://graph.facebook.com/v18.0/${firstNumber.wabaid}/message_templates?name=${campaign.templateName}&limit=1`,
+          `https://graph.facebook.com/v25.0/${firstNumber.wabaid}/message_templates?name=${campaign.templateName}&limit=1`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         );
         const tplData = (await tplRes.json()) as { data?: { category: string }[] };
