@@ -36,6 +36,14 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           await processStatusUpdate(status);
         }
 
+        // Handle incoming messages (check for unsubscribe)
+        const messages = change.value?.messages || [];
+        for (const msg of messages) {
+          if (msg.type === "text" && msg.text?.body) {
+            await checkUnsubscribe(msg.from, msg.text.body);
+          }
+        }
+
         // Handle template category updates
         if (change.field === "template_category_update") {
           await processTemplateCategoryUpdate(change.value, entry.id);
@@ -122,4 +130,34 @@ async function processTemplateCategoryUpdate(value: {
   // we'd need to know which business this WABA belongs to.
   // For now, log the change for monitoring.
   console.log(`ACTION NEEDED: Template "${templateName}" changed to ${newCategory} on WABA ${wabaid}`);
+}
+
+const UNSUBSCRIBE_TABLE = process.env.UNSUBSCRIBE_TABLE || "autoreach-unsubscribe-hardik";
+const UNSUBSCRIBE_KEYWORDS = ["stop", "unsubscribe", "opt out", "optout", "cancel", "remove me", "don't send", "dont send"];
+
+async function checkUnsubscribe(from: string, text: string) {
+  const lower = text.toLowerCase().trim();
+  const isUnsubscribe = UNSUBSCRIBE_KEYWORDS.some((kw) => lower.includes(kw));
+
+  if (!isUnsubscribe) return;
+
+  const phone = from.replace(/\D/g, "");
+  console.log(`Unsubscribe detected from ${phone}: "${text}"`);
+
+  try {
+    const { PutCommand } = await import("@aws-sdk/lib-dynamodb");
+    await docClient.send(
+      new PutCommand({
+        TableName: UNSUBSCRIBE_TABLE,
+        Item: {
+          PK: `PHONE#${phone}`,
+          phone,
+          reason: text,
+          unsubscribedAt: new Date().toISOString(),
+        },
+      })
+    );
+  } catch (err) {
+    console.error("Failed to save unsubscribe:", err);
+  }
 }

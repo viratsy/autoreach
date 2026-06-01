@@ -56,6 +56,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   "130429": "Rate limit hit",
   "131056": "Pair rate limit hit",
   "368": "Temporarily blocked for policy violations",
+  "unsubscribed": "User unsubscribed",
 };
 
 function getErrorMessage(code: string): string {
@@ -77,6 +78,7 @@ const msgStatusColors: Record<string, string> = {
   delivered: "text-green-600",
   read: "text-purple-600",
   failed: "text-red-600",
+  skipped: "text-orange-500",
 };
 
 export default function CampaignViewPage() {

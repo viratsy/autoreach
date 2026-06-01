@@ -70,8 +70,38 @@ export const handler: SQSHandler = async (event) => {
     const tplName = templateMappings?.[phoneNumberId] || templateName;
 
     // Send messages
+    const UNSUBSCRIBE_TABLE = process.env.UNSUBSCRIBE_TABLE || "autoreach-unsubscribe-hardik";
+
     for (const contact of contacts) {
       try {
+        // Check unsubscribe list
+        const phone = (contact.phone || "").replace(/\D/g, "");
+        const unsubResult = await docClient.send(
+          new GetCommand({ TableName: UNSUBSCRIBE_TABLE, Key: { PK: `PHONE#${phone}` } })
+        );
+        if (unsubResult.Item) {
+          // Skip - user unsubscribed
+          await docClient.send(
+            new PutCommand({
+              TableName: TABLES.MESSAGES,
+              Item: {
+                PK: `CAMP#${campaignId}`,
+                SK: `MSG#${contact.phone}`,
+                phoneNumber: contact.phone,
+                contactName: contact.name || "",
+                sendingNumberId: phoneNumberId,
+                metaMessageId: "",
+                status: "skipped",
+                repliedAt: null,
+                errorCode: "unsubscribed",
+                sentAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              },
+            })
+          );
+          continue;
+        }
+
         // Build parameters
         const parameters = Object.entries(parameterMapping as Record<string, string>)
           .sort(([a], [b]) => Number(a) - Number(b))
