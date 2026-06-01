@@ -307,25 +307,22 @@ export default function WorkshopConfigPage() {
                                     {/* Params */}
                                     <div className="flex flex-wrap gap-1.5 items-center">
                                       {(numConfig.bodyParams || []).map((param, idx) => (
-                                        <div key={idx} className="flex items-center gap-0.5 bg-gray-50 rounded-lg border border-gray-200 pr-1">
+                                        <div key={idx} className="flex items-center bg-white rounded-lg border border-gray-200 shadow-sm">
                                           <select value={param} onChange={(e) => {
                                             const p = [...(numConfig.bodyParams || [])]; p[idx] = e.target.value;
                                             updateRunKeyTemplate(runKey, numId, "bodyParams", p);
-                                          }} className="border-0 bg-transparent rounded-lg px-2 py-1 text-xs focus:ring-0">
-                                            <option value="">—</option>
-                                            <optgroup label="DB">{DB_PARAMS.map((pk) => <option key={pk} value={pk}>{pk}</option>)}</optgroup>
-                                            <optgroup label="Computed">{COMPUTED_PARAMS.map((pk) => <option key={pk} value={pk}>{pk}</option>)}</optgroup>
-                                            {Object.keys(config.customParams || {}).length > 0 && (
-                                              <optgroup label="Custom">{Object.keys(config.customParams || {}).map((pk) => <option key={pk} value={`__CUSTOM__${pk}`}>{pk}</option>)}</optgroup>
-                                            )}
+                                          }} className="border-0 bg-transparent rounded-lg px-2 py-1.5 text-xs font-medium focus:ring-0 appearance-none pr-6 cursor-pointer">
+                                            <option value="">select...</option>
+                                            {[...DB_PARAMS, ...COMPUTED_PARAMS].map((pk) => <option key={pk} value={pk}>{pk}</option>)}
+                                            {Object.keys(config.customParams || {}).length > 0 && Object.keys(config.customParams || {}).map((pk) => <option key={pk} value={`__CUSTOM__${pk}`}>⚡ {pk}</option>)}
                                           </select>
                                           <button onClick={() => {
                                             const p = [...(numConfig.bodyParams || [])]; p.splice(idx, 1);
                                             updateRunKeyTemplate(runKey, numId, "bodyParams", p);
-                                          }} className="text-red-300 hover:text-red-500"><Trash2 className="w-3 h-3" /></button>
+                                          }} className="text-red-300 hover:text-red-500 pr-2"><Trash2 className="w-3 h-3" /></button>
                                         </div>
                                       ))}
-                                      <button onClick={() => updateRunKeyTemplate(runKey, numId, "bodyParams", [...(numConfig.bodyParams || []), ""])} className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-0.5 px-2 py-1 rounded-lg hover:bg-primary-50">
+                                      <button onClick={() => updateRunKeyTemplate(runKey, numId, "bodyParams", [...(numConfig.bodyParams || []), ""])} className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-0.5 px-2 py-1.5 rounded-lg hover:bg-primary-50 border border-dashed border-primary-200">
                                         <Plus className="w-3 h-3" /> param
                                       </button>
                                     </div>
