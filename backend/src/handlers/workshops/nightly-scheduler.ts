@@ -131,12 +131,101 @@ async function processActiveContacts(today: string) {
 
     console.log(`${eligible.length} eligible contacts for ${workshopName} re-engagement`);
 
-    // TODO: Schedule AutoReach campaigns for eligible contacts
-    // This will use the same campaign creation flow:
-    // - Create campaign with eligible contacts as CSV
-    // - Use templates for each run_key (2days_to_go, 1day_to_go, etc.)
-    // - Schedule at appropriate times based on batch date
-    // For now, just increment counters
+    // Get workshop config for this cycle
+    const cycle = eligible[0].counter + 1; // next cycle
+    const configResult = await docClient.send(
+      new GetCommand({
+        TableName: process.env.WORKSHOP_CONFIG_TABLE || "autoreach-workshop-config-hardik",
+        Key: { PK: `WSCONFIG#${wsCode}`, SK: `CYCLE#${cycle > 4 ? 4 : cycle}` },
+      })
+    );
+    const wsConfig = configResult.Item;
+
+    if (!wsConfig || !wsConfig.runKeys || Object.keys(wsConfig.runKeys).length === 0) {
+      console.log(`No config found for ${wsCode} cycle ${cycle}, skipping campaign creation`);
+    } else {
+      // Get business access token
+      const bizResult = await docClient.send(
+        new GetCommand({
+          TableName: process.env.BUSINESSES_TABLE || "autoreach-businesses",
+          Key: { PK: `BIZ#${wsConfig.businessId}`, SK: "METADATA" },
+        })
+      );
+      const business = bizResult.Item;
+      const accessToken = business?.accessToken || "";
+
+      if (accessToken) {
+        // Schedule campaigns per run_key
+        const { SQSClient, SendMessageBatchCommand } = await import("@aws-sdk/client-sqs");
+        const sqs = new SQSClient({});
+
+        for (const [runKey, runKeyConfig] of Object.entries(wsConfig.runKeys as Record<string, { numbers: Record<string, { templateName: string; bodyParams: string[] }> }>)) {
+          const numbers = Object.keys(runKeyConfig.numbers || {});
+          if (numbers.length === 0) continue;
+
+          // Build contacts with resolved params
+          const contactBatches: { contacts: { phone: string; name: string; [key: string]: string }[]; phoneNumberId: string; templateName: string; bodyParams: string[] }[] = [];
+
+          // Distribute contacts round-robin across numbers
+          const perNumber: Record<string, typeof eligible> = {};
+          eligible.forEach((contact, i) => {
+            const numId = numbers[i % numbers.length];
+            if (!perNumber[numId]) perNumber[numId] = [];
+            perNumber[numId].push(contact);
+          });
+
+          for (const [numId, numContacts] of Object.entries(perNumber)) {
+            const numConfig = runKeyConfig.numbers[numId];
+            if (!numConfig?.templateName) continue;
+
+            contactBatches.push({
+              contacts: numContacts.map((c) => ({
+                phone: c.phone,
+                name: c.name,
+                email: c.email,
+                workshop_name: workshopName,
+                workshop_date: batchDetails.Date || "",
+                workshop_time: batchDetails.Date?.includes("07:00") ? "07:00 PM IST" : "11:00 AM IST",
+                zoom_link: batchDetails.ZoomLink || "",
+                whatsapp_group: batchDetails.WhatsappLink || "",
+              })),
+              phoneNumberId: numId,
+              templateName: numConfig.templateName,
+              bodyParams: numConfig.bodyParams || [],
+            });
+          }
+
+          // Push to SQS for sending
+          for (let i = 0; i < contactBatches.length; i += 10) {
+            const chunk = contactBatches.slice(i, i + 10);
+            await sqs.send(
+              new SendMessageBatchCommand({
+                QueueUrl: SEND_QUEUE_URL,
+                Entries: chunk.map((batch, idx) => ({
+                  Id: `ws-${wsCode}-${runKey}-${i + idx}`,
+                  MessageBody: JSON.stringify({
+                    campaignId: `ws_${wsCode}_${today}_${runKey}`,
+                    templateName: batch.templateName,
+                    templateMappings: {},
+                    parameterMapping: Object.fromEntries(batch.bodyParams.map((p, pi) => [String(pi + 1), p.startsWith("__CUSTOM__") ? `__STATIC__${wsConfig.customParams?.[p.replace("__CUSTOM__", "")] || ""}` : p])),
+                    headerImageUrl: "",
+                    numbersWithImageHeader: [],
+                    accessToken,
+                    batch: {
+                      contacts: batch.contacts,
+                      phoneNumberId: batch.phoneNumberId,
+                      displayName: wsConfig.numbers?.[batch.phoneNumberId]?.displayName || "",
+                    },
+                  }),
+                })),
+              })
+            );
+          }
+
+          console.log(`Queued ${runKey} for ${eligible.length} contacts across ${numbers.length} numbers`);
+        }
+      }
+    }
 
     for (const contact of eligible) {
       const newCounter = (contact.counter || 0) + 1;
