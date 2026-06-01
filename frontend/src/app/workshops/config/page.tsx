@@ -40,7 +40,7 @@ interface TemplateItem {
 
 const WORKSHOP_CODES = ["aitools", "msai", "aidash", "aibuild"];
 const DB_PARAMS = ["name", "zoom_link", "whatsapp_group", "workshop_name", "workshop_date", "workshop_time"];
-const COMPUTED_PARAMS = ["full_workshop_name", "workshop_name_w", "workshop_date_time", "workshop_time_short", "mentor_name", "w_type", "w_name", "three_hours_text"];
+const COMPUTED_PARAMS = ["full_workshop_name", "workshop_name_w", "workshop_date_time", "workshop_time_short", "mentor_name", "w_type", "w_name", "three_hours_text", "duration"];
 const DEFAULT_RUN_KEYS = [
   "2days_to_go", "1day_to_go", "9am_groupjoin", "1pm_group_join", "3pm_group_join",
   "60_mins_to_go", "20_mins_to_go", "we_are_live",
