@@ -704,6 +704,21 @@ Resources:
             Path: /workshops/register
             Method: POST
 
+  WorkshopBulkRegisterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/workshops/bulk-register.handler
+      Timeout: 60
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-reengagement-${EnvName}"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /workshops/bulk-register
+            Method: POST
+
   WorkshopContactsFunction:
     Type: AWS::Serverless::Function
     Properties:

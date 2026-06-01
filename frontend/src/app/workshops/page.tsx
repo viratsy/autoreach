@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Sidebar from "@/components/layout/Sidebar";
 import AuthGuard from "@/components/layout/AuthGuard";
 import { apiRequest } from "@/lib/api";
-import { Download, Users, CheckCircle, XCircle, Clock } from "lucide-react";
+import { Download, Users, CheckCircle, XCircle, Clock, Upload } from "lucide-react";
 
 interface WorkshopStat {
   workshopName: string;
@@ -43,6 +43,13 @@ export default function WorkshopsPage() {
   const [loading, setLoading] = useState(true);
   const [loadingContacts, setLoadingContacts] = useState(false);
   const [totalContacts, setTotalContacts] = useState(0);
+  const [toast, setToast] = useState("");
+  // Bulk upload state
+  const [uploadMode, setUploadMode] = useState<"current" | "next">("next");
+  const [uploadWs, setUploadWs] = useState("Generative AI Tools");
+  const [uploadData, setUploadData] = useState<{ name: string; phone: string; email: string }[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadStats();
@@ -51,6 +58,8 @@ export default function WorkshopsPage() {
   useEffect(() => {
     loadContacts();
   }, [selectedWs, selectedStatus]);
+
+  useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 4000); return () => clearTimeout(t); } }, [toast]);
 
   const loadStats = async () => {
     try {
@@ -61,6 +70,45 @@ export default function WorkshopsPage() {
         setSelectedWs(data.stats[0].wsCode);
       }
     } catch {} finally { setLoading(false); }
+  };
+
+  const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const lines = text.split("\n").filter((l) => l.trim());
+      if (lines.length < 2) return;
+      const headers = lines[0].toLowerCase().split(",").map((h) => h.trim());
+      const phoneIdx = headers.findIndex((h) => h.includes("phone") || h.includes("mobile") || h.includes("number"));
+      const nameIdx = headers.findIndex((h) => h.includes("name"));
+      const emailIdx = headers.findIndex((h) => h.includes("email"));
+      if (phoneIdx === -1) { setToast("CSV must have a phone/mobile column"); return; }
+      const parsed = lines.slice(1).map((line) => {
+        const cols = line.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+        return { phone: cols[phoneIdx] || "", name: cols[nameIdx] || "", email: cols[emailIdx] || "" };
+      }).filter((r) => r.phone);
+      setUploadData(parsed);
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  const handleBulkUpload = async () => {
+    if (!uploadData.length) return;
+    setUploading(true);
+    try {
+      const res = await apiRequest<{ added: number; skipped: number }>("/workshops/bulk-register", {
+        method: "POST",
+        body: JSON.stringify({ contacts: uploadData, workshopName: uploadWs, mode: uploadMode }),
+      });
+      setToast(`✓ Added ${res.added}, skipped ${res.skipped} (already exist)`);
+      setUploadData([]);
+      loadStats();
+      loadContacts();
+    } catch { setToast("✗ Upload failed"); }
+    finally { setUploading(false); }
   };
 
   const loadContacts = async () => {
@@ -152,6 +200,48 @@ export default function WorkshopsPage() {
 
                 {/* Contacts Table */}
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+
+                  {/* Bulk Upload Section */}
+                  <div className="px-5 py-4 border-b border-gray-200 bg-gray-50">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-semibold text-gray-900">Bulk Upload to Funnel</h3>
+                      <input ref={fileRef} type="file" accept=".csv" onChange={handleCSVUpload} className="hidden" />
+                      <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600 text-white rounded-lg text-xs font-medium hover:bg-primary-700">
+                        <Upload className="w-3 h-3" /> Upload CSV
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <select value={uploadWs} onChange={(e) => setUploadWs(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs">
+                        <option value="Generative AI Tools">AI Tools</option>
+                        <option value="MS Office with AI">MS AI</option>
+                        <option value="AI Dashboard">AI Dash</option>
+                        <option value="AI Builder">AI Build</option>
+                      </select>
+                      <div className="flex bg-white border border-gray-200 rounded-lg p-0.5">
+                        <button onClick={() => setUploadMode("current")} className={`px-3 py-1 text-xs font-medium rounded-md ${uploadMode === "current" ? "bg-gray-900 text-white" : "text-gray-500"}`}>
+                          Current (waiting)
+                        </button>
+                        <button onClick={() => setUploadMode("next")} className={`px-3 py-1 text-xs font-medium rounded-md ${uploadMode === "next" ? "bg-primary-600 text-white" : "text-gray-500"}`}>
+                          Next (active, counter=1)
+                        </button>
+                      </div>
+                      {uploadData.length > 0 && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-600">{uploadData.length} contacts ready</span>
+                          <button onClick={handleBulkUpload} disabled={uploading} className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 disabled:opacity-50">
+                            {uploading ? "Uploading..." : "Submit"}
+                          </button>
+                          <button onClick={() => setUploadData([])} className="text-xs text-red-500 hover:text-red-700">Clear</button>
+                        </div>
+                      )}
+                    </div>
+                    {uploadData.length > 0 && (
+                      <div className="mt-2 text-[10px] text-gray-400">
+                        Preview: {uploadData.slice(0, 3).map((c) => `${c.name || "?"} (${c.phone})`).join(", ")}{uploadData.length > 3 ? ` +${uploadData.length - 3} more` : ""}
+                      </div>
+                    )}
+                  </div>
+
                   <div className="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <select
@@ -230,6 +320,7 @@ export default function WorkshopsPage() {
           </div>
         </main>
       </div>
+      {toast && <div className="fixed bottom-6 right-6 px-5 py-3 rounded-xl shadow-lg text-sm font-medium bg-gray-900 text-white z-50">{toast}</div>}
     </AuthGuard>
   );
 }
