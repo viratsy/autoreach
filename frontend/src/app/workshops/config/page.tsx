@@ -53,10 +53,34 @@ export default function WorkshopConfigPage() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
   const [selectedNumbers, setSelectedNumbers] = useState<string[]>([]);
+  const [templates, setTemplates] = useState<Record<string, { templateName: string; parameterCount: number; components: { type: string; text?: string }[] }[]>>({});
 
   useEffect(() => {
     apiRequest<{ businesses: Business[] }>("/businesses").then((d) => setBusinesses(d.businesses));
   }, []);
+
+  // Load templates for selected numbers
+  useEffect(() => {
+    if (config?.businessId && selectedNumbers.length > 0) {
+      const params = new URLSearchParams({
+        businessId: config.businessId,
+        phoneNumberIds: selectedNumbers.join(","),
+      });
+      apiRequest<{ templates: { templateName: string; parameterCount: number; components: { type: string; text?: string }[]; availableOn: string[] }[] }>(`/templates?${params}`)
+        .then((data) => {
+          // Group templates by number
+          const byNumber: typeof templates = {};
+          for (const tpl of data.templates) {
+            for (const numId of tpl.availableOn) {
+              if (!byNumber[numId]) byNumber[numId] = [];
+              byNumber[numId].push({ templateName: tpl.templateName, parameterCount: tpl.parameterCount, components: tpl.components });
+            }
+          }
+          setTemplates(byNumber);
+        })
+        .catch(() => {});
+    }
+  }, [config?.businessId, selectedNumbers]);
 
   useEffect(() => {
     loadConfig();
@@ -222,14 +246,36 @@ export default function WorkshopConfigPage() {
                               <div key={numId} className="pl-3 border-l-2 border-gray-200">
                                 <p className="text-xs text-gray-500 mb-1">{numName}</p>
                                 <div className="flex gap-2 mb-2">
-                                  <input
-                                    type="text"
+                                  <select
                                     value={numConfig.templateName}
-                                    onChange={(e) => updateRunKeyTemplate(runKey, numId, "templateName", e.target.value)}
-                                    placeholder="Template name"
+                                    onChange={(e) => {
+                                      updateRunKeyTemplate(runKey, numId, "templateName", e.target.value);
+                                      // Auto-fill params from template
+                                      const tpl = (templates[numId] || []).find((t) => t.templateName === e.target.value);
+                                      if (tpl) {
+                                        // Set empty params matching parameter count
+                                        const params = Array(tpl.parameterCount).fill("");
+                                        updateRunKeyTemplate(runKey, numId, "bodyParams", params);
+                                      }
+                                    }}
                                     className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm"
-                                  />
+                                  >
+                                    <option value="">Select template</option>
+                                    {(templates[numId] || []).map((tpl) => (
+                                      <option key={tpl.templateName} value={tpl.templateName}>
+                                        {tpl.templateName} ({tpl.parameterCount}p)
+                                      </option>
+                                    ))}
+                                  </select>
                                 </div>
+                                {/* Template preview */}
+                                {numConfig.templateName && (() => {
+                                  const tpl = (templates[numId] || []).find((t) => t.templateName === numConfig.templateName);
+                                  const bodyText = tpl?.components?.find((c) => (c.type as string).toUpperCase() === "BODY")?.text;
+                                  return bodyText ? (
+                                    <div className="mb-2 p-2 bg-gray-50 rounded text-xs text-gray-600 whitespace-pre-wrap">{bodyText}</div>
+                                  ) : null;
+                                })()}
                                 <div className="flex flex-wrap gap-1 items-center">
                                   {(numConfig.bodyParams || []).map((param, idx) => (
                                     <div key={idx} className="flex items-center gap-1">
