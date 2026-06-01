@@ -207,14 +207,14 @@ export default function WorkshopConfigPage() {
 
                     <div className="space-y-2">
                       {DEFAULT_RUN_KEYS.filter((rk) => rk.includes(runKeyFilter.toLowerCase())).map((runKey) => (
-                        <div key={runKey} className="border border-gray-100 rounded-xl overflow-hidden">
+                        <div key={runKey} className="border border-gray-100 rounded-xl">
                           <button onClick={() => toggleRunKey(runKey)} className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors">
                             <span className="text-sm font-medium text-gray-900">{runKey}</span>
                             {expandedRunKeys.has(runKey) ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
                           </button>
 
                           {expandedRunKeys.has(runKey) && (
-                            <div className="px-4 pb-4 space-y-4 border-t border-gray-100 pt-3">
+                            <div className="px-4 pb-4 space-y-4 border-t border-gray-100 pt-3 overflow-visible">
                               {selectedNumbers.map((numId) => {
                                 const numConfig = config.runKeys[runKey]?.numbers[numId] || { templateName: "", bodyParams: [], imageType: null };
                                 const numName = config.numbers[numId]?.displayName || numId;
@@ -240,7 +240,7 @@ export default function WorkshopConfigPage() {
                                         className={`w-full border rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent ${numConfig.templateName ? "border-primary-300 bg-primary-50 font-medium" : "border-gray-200"}`}
                                       />
                                       {tplSearches[`${searchKey}_open`] && !numConfig.templateName && (
-                                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                                        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
                                           {(templates[numId] || [])
                                             .filter((t) => t.templateName.includes((tplSearches[searchKey] || "").toLowerCase()))
                                             .map((tpl) => {
