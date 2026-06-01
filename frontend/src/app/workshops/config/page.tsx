@@ -41,6 +41,7 @@ interface TemplateItem {
 }
 
 const WORKSHOP_CODES = ["aitools", "msai", "aidash", "aibuild"];
+const ALL_WS_CODES = ["__DEFAULT__", ...["aitools", "msai", "aidash", "aibuild"]];
 const DB_PARAMS = ["name", "zoom_link", "whatsapp_group", "workshop_name", "workshop_date", "workshop_time"];
 const COMPUTED_PARAMS = ["full_workshop_name", "workshop_name_w", "workshop_date_time", "workshop_time_short", "mentor_name", "w_type", "w_name", "w_date", "three_hours_text", "duration"];
 const DEFAULT_RUN_KEYS = [
@@ -75,10 +76,17 @@ export default function WorkshopConfigPage() {
   const [testingKey, setTestingKey] = useState("");
   const [testResults, setTestResults] = useState<Record<string, string>>({});
   const [showRunKeyPicker, setShowRunKeyPicker] = useState(false);
+  const [defaultConfig, setDefaultConfig] = useState<WorkshopConfig | null>(null);
 
   useEffect(() => { apiRequest<{ businesses: Business[] }>("/businesses").then((d) => setBusinesses(d.businesses)); }, []);
   useEffect(() => { loadConfig(); }, [wsCode, cycle]);
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 3000); return () => clearTimeout(t); } }, [toast]);
+  useEffect(() => {
+    // Load default config
+    apiRequest<{ config: WorkshopConfig | null }>(`/workshops/config?wsCode=__DEFAULT__&cycle=0`)
+      .then((data) => { if (data.config) setDefaultConfig(data.config); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (config?.businessId && selectedNumbers.length > 0) {
@@ -108,7 +116,12 @@ export default function WorkshopConfigPage() {
   const handleSave = async () => {
     if (!config) return;
     setSaving(true);
-    try { await apiRequest("/workshops/config", { method: "PUT", body: JSON.stringify(config) }); setToast("✓ Saved"); }
+    try {
+      await apiRequest("/workshops/config", { method: "PUT", body: JSON.stringify(config) });
+      setToast("✓ Saved");
+      // If saving default, update local default state
+      if (wsCode === "__DEFAULT__") setDefaultConfig(config);
+    }
     catch { setToast("✗ Failed"); }
     finally { setSaving(false); }
   };
@@ -203,6 +216,20 @@ export default function WorkshopConfigPage() {
     setToast("✓ Params copied");
   };
 
+  const copyFromDefault = (runKey: string, numId: string) => {
+    if (!config || !defaultConfig) { setToast("No default config found"); return; }
+    const defaultRunKey = defaultConfig.runKeys[runKey];
+    if (!defaultRunKey) { setToast(`No default mapping for ${runKey}`); return; }
+    // Find any number in default that has params (since params are same across numbers)
+    const defaultNumIds = Object.keys(defaultRunKey.numbers || {});
+    const sourceNumId = defaultNumIds.find((nId) => defaultRunKey.numbers[nId]?.bodyParams?.length > 0);
+    if (!sourceNumId) { setToast("Default has no params for this run key"); return; }
+    const sourceConfig = defaultRunKey.numbers[sourceNumId];
+    // Copy params only (keep the number's own template)
+    updateRunKeyTemplate(runKey, numId, "bodyParams", [...sourceConfig.bodyParams]);
+    setToast("✓ Default params applied");
+  };
+
   return (
     <AuthGuard>
       <div className="flex h-screen">
@@ -237,7 +264,7 @@ export default function WorkshopConfigPage() {
             {/* Workshop + Cycle selector */}
             <div className="flex items-center gap-4 mb-6">
               <select value={wsCode} onChange={(e) => setWsCode(e.target.value)} className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm">
-                {WORKSHOP_CODES.map((c) => <option key={c} value={c}>{c.toUpperCase()}</option>)}
+                {ALL_WS_CODES.map((c) => <option key={c} value={c}>{c === "__DEFAULT__" ? "⚙️ DEFAULT" : c.toUpperCase()}</option>)}
               </select>
               <div className="flex bg-white border border-gray-200 rounded-xl p-1 shadow-sm">
                 {[0, 1, 2, 3, 4].map((c) => (
@@ -360,6 +387,14 @@ export default function WorkshopConfigPage() {
                                               className="px-2 py-1 text-[10px] font-medium bg-gray-100 text-gray-600 rounded-md hover:bg-gray-200 border border-gray-200 transition-all"
                                             >
                                               Copy params ↑
+                                            </button>
+                                          )}
+                                          {defaultConfig && wsCode !== "__DEFAULT__" && (
+                                            <button
+                                              onClick={() => copyFromDefault(runKey, numId)}
+                                              className="px-2 py-1 text-[10px] font-medium bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 border border-blue-200 transition-all"
+                                            >
+                                              Use Default
                                             </button>
                                           )}
                                           <button

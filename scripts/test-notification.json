@@ -1,0 +1,17 @@
+{
+  "PK": {"S": "ACTIVE"},
+  "SK": {"S": "TS#2026-06-02T00:00:00.000Z#test123"},
+  "id": {"S": "test123"},
+  "type": {"S": "template_marketing"},
+  "businessId": {"S": "test"},
+  "businessName": {"S": "H R Academy"},
+  "phoneNumberId": {"S": "123"},
+  "phoneDisplayName": {"S": "Hardik Raja"},
+  "templateName": {"S": "2days_to_go"},
+  "errorMessage": {"S": "Template 2days_to_go moved to MARKETING category. Campaign aborted."},
+  "campaignId": {"S": "test_camp"},
+  "appealLink": {"S": "https://business.facebook.com/wa/manage/message-templates/"},
+  "businessManagerLink": {"S": "https://business.facebook.com/settings/whatsapp-business-accounts/"},
+  "createdAt": {"S": "2026-06-02T00:00:00.000Z"},
+  "resolved": {"BOOL": false}
+}

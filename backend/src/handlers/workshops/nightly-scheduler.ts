@@ -151,6 +151,18 @@ async function processActiveContacts(today: string) {
     );
     const wsConfig = configResult.Item;
 
+    // Load default config for fallback params
+    let defaultWsConfig: Record<string, unknown> | null = null;
+    if (wsConfig) {
+      const defaultResult = await docClient.send(
+        new GetCommand({
+          TableName: process.env.WORKSHOP_CONFIG_TABLE || "autoreach-workshop-config-hardik",
+          Key: { PK: "WSCONFIG#__DEFAULT__", SK: "CYCLE#0" },
+        })
+      );
+      defaultWsConfig = defaultResult.Item || null;
+    }
+
     if (!wsConfig || !wsConfig.runKeys || Object.keys(wsConfig.runKeys).length === 0) {
       console.log(`No config found for ${wsCode} cycle ${cycle}, skipping campaign creation`);
     } else {
@@ -218,7 +230,9 @@ async function processActiveContacts(today: string) {
               }),
               phoneNumberId: numId,
               templateName: numConfig.templateName,
-              bodyParams: numConfig.bodyParams || [],
+              bodyParams: (numConfig.bodyParams && numConfig.bodyParams.length > 0)
+                ? numConfig.bodyParams
+                : getDefaultParams(defaultWsConfig, runKey),
             });
           }
 
@@ -341,4 +355,14 @@ function formatDateHuman(dateStr: string): string {
   } catch {
     return dateStr;
   }
+}
+
+function getDefaultParams(defaultConfig: Record<string, unknown> | null, runKey: string): string[] {
+  if (!defaultConfig?.runKeys) return [];
+  const runKeys = defaultConfig.runKeys as Record<string, { numbers: Record<string, { bodyParams?: string[] }> }>;
+  const runKeyConfig = runKeys[runKey];
+  if (!runKeyConfig?.numbers) return [];
+  // Get params from any number in the default (they're all the same)
+  const firstNumId = Object.keys(runKeyConfig.numbers)[0];
+  return firstNumId ? (runKeyConfig.numbers[firstNumId].bodyParams || []) : [];
 }
