@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Sidebar from "@/components/layout/Sidebar";
 import AuthGuard from "@/components/layout/AuthGuard";
 import { apiRequest } from "@/lib/api";
-import { Save, Plus, Trash2, Search, ChevronDown, ChevronRight } from "lucide-react";
+import { Save, Plus, Trash2, Search, ChevronDown, ChevronRight, Send } from "lucide-react";
 
 interface Business {
   businessId: string;
@@ -30,6 +30,7 @@ interface WorkshopConfig {
   numbers: Record<string, { displayName: string }>;
   runKeys: Record<string, RunKeyConfig>;
   customParams?: Record<string, string>;
+  activeRunKeys?: string[];
 }
 
 interface TemplateItem {
@@ -49,6 +50,15 @@ const DEFAULT_RUN_KEYS = [
   "its_11_am", "its_11_10_am", "its_11_20_am", "its_11_30_am",
 ];
 
+const SAMPLE_VALUES: Record<string, string> = {
+  name: "Rahul", zoom_link: "https://zoom.us/j/123", whatsapp_group: "https://chat.whatsapp.com/abc",
+  workshop_name: "AI Tools", workshop_date: "2026-06-05", workshop_time: "7:00 PM",
+  full_workshop_name: "Generative AI Tools", workshop_name_w: "AI Tools Workshop",
+  workshop_date_time: "5th June, 7:00 PM IST", workshop_time_short: "7 PM",
+  mentor_name: "Hardik Raja (Your Mentor)", w_type: "Workshop", w_name: "AI Tools",
+  three_hours_text: "3 hours live Generative AI Tools", duration: "7:00 PM to 10:00 PM IST",
+};
+
 export default function WorkshopConfigPage() {
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [config, setConfig] = useState<WorkshopConfig | null>(null);
@@ -61,6 +71,10 @@ export default function WorkshopConfigPage() {
   const [expandedRunKeys, setExpandedRunKeys] = useState<Set<string>>(new Set(["2days_to_go"]));
   const [runKeyFilter, setRunKeyFilter] = useState("");
   const [tplSearches, setTplSearches] = useState<Record<string, string>>({});
+  const [testPhone, setTestPhone] = useState("");
+  const [testingKey, setTestingKey] = useState("");
+  const [testResults, setTestResults] = useState<Record<string, string>>({});
+  const [showRunKeyPicker, setShowRunKeyPicker] = useState(false);
 
   useEffect(() => { apiRequest<{ businesses: Business[] }>("/businesses").then((d) => setBusinesses(d.businesses)); }, []);
   useEffect(() => { loadConfig(); }, [wsCode, cycle]);
@@ -126,10 +140,59 @@ export default function WorkshopConfigPage() {
     setExpandedRunKeys(s);
   };
 
-  const initConfig = (businessId: string) => {
-    setConfig({ wsCode, workshopName: wsCode, cycle, businessId, numbers: {}, runKeys: {}, customParams: {} });
+  const toggleActiveRunKey = (rk: string) => {
+    if (!config) return;
+    const current = config.activeRunKeys || DEFAULT_RUN_KEYS;
+    const updated = current.includes(rk) ? current.filter((k) => k !== rk) : [...current, rk];
+    setConfig({ ...config, activeRunKeys: updated });
   };
 
+  const initConfig = (businessId: string) => {
+    setConfig({ wsCode, workshopName: wsCode, cycle, businessId, numbers: {}, runKeys: {}, customParams: {}, activeRunKeys: DEFAULT_RUN_KEYS });
+  };
+
+  const getParamSampleValue = (paramKey: string): string => {
+    if (!paramKey) return "";
+    const cleanKey = paramKey.startsWith("__CUSTOM__") ? paramKey.replace("__CUSTOM__", "") : paramKey;
+    if (paramKey.startsWith("__CUSTOM__")) return (config?.customParams || {})[cleanKey] || `[${cleanKey}]`;
+    return SAMPLE_VALUES[cleanKey] || `[${cleanKey}]`;
+  };
+
+  const handleTestSend = async (runKey: string, numId: string) => {
+    if (!config || !testPhone) { setToast("Enter test phone number"); return; }
+    const numConfig = config.runKeys[runKey]?.numbers[numId];
+    if (!numConfig?.templateName) { setToast("No template selected"); return; }
+
+    const resultKey = `${runKey}_${numId}`;
+    setTestingKey(resultKey);
+
+    // Build parameter values from sample data
+    const parameterValues: Record<string, string> = {};
+    (numConfig.bodyParams || []).forEach((p, i) => { parameterValues[String(i + 1)] = getParamSampleValue(p); });
+
+    const biz = businesses.find((b) => b.businessId === config.businessId);
+    const phoneNum = biz?.phoneNumbers.find((pn) => pn.phoneNumberId === numId);
+
+    try {
+      const res = await apiRequest<{ results: { status: string; error?: string }[] }>("/campaigns/test-send", {
+        method: "POST",
+        body: JSON.stringify({
+          businessId: config.businessId,
+          selectedNumbers: [{ phoneNumberId: numId, displayName: phoneNum?.displayName || numId }],
+          templateName: numConfig.templateName,
+          templateMappings: {},
+          parameterValues,
+          testPhone: testPhone.startsWith("91") ? testPhone : `91${testPhone}`,
+        }),
+      });
+      const r = res.results[0];
+      setTestResults((prev) => ({ ...prev, [resultKey]: r.status === "sent" ? "✓ Sent" : `✗ ${r.error || "Failed"}` }));
+      setToast(r.status === "sent" ? "✓ Test sent!" : `✗ ${r.error}`);
+    } catch { setTestResults((prev) => ({ ...prev, [resultKey]: "✗ Error" })); setToast("✗ Test failed"); }
+    finally { setTestingKey(""); }
+  };
+
+  const activeRunKeys = config?.activeRunKeys || DEFAULT_RUN_KEYS;
 
   return (
     <AuthGuard>
@@ -143,10 +206,23 @@ export default function WorkshopConfigPage() {
                 <h2 className="text-2xl font-bold text-gray-900">Workshop Config</h2>
                 <p className="text-sm text-gray-500 mt-1">Template routing per number per run key</p>
               </div>
-              <button onClick={handleSave} disabled={saving || !config} className="flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white rounded-xl text-sm font-medium disabled:opacity-50 hover:bg-primary-700 shadow-sm">
-                <Save className="w-4 h-4" />
-                {saving ? "Saving..." : "Save"}
-              </button>
+              <div className="flex items-center gap-3">
+                {/* Test phone input */}
+                <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2 shadow-sm">
+                  <Send className="w-3.5 h-3.5 text-gray-400" />
+                  <input
+                    type="text"
+                    value={testPhone}
+                    onChange={(e) => setTestPhone(e.target.value.replace(/\D/g, ""))}
+                    placeholder="Test phone (91...)"
+                    className="w-32 text-sm border-0 focus:ring-0 p-0 bg-transparent"
+                  />
+                </div>
+                <button onClick={handleSave} disabled={saving || !config} className="flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white rounded-xl text-sm font-medium disabled:opacity-50 hover:bg-primary-700 shadow-sm">
+                  <Save className="w-4 h-4" />
+                  {saving ? "Saving..." : "Save"}
+                </button>
+              </div>
             </div>
 
             {/* Workshop + Cycle selector */}
@@ -203,7 +279,34 @@ export default function WorkshopConfigPage() {
                   )}
                 </div>
 
-                {/* Run Keys */}
+                {/* Active Run Keys Picker */}
+                {selectedNumbers.length > 0 && (
+                  <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Active Run Keys</h3>
+                      <button onClick={() => setShowRunKeyPicker(!showRunKeyPicker)} className="text-xs text-primary-600 hover:text-primary-700 font-medium">
+                        {showRunKeyPicker ? "Done" : `Edit (${activeRunKeys.length}/${DEFAULT_RUN_KEYS.length})`}
+                      </button>
+                    </div>
+                    {showRunKeyPicker ? (
+                      <div className="flex flex-wrap gap-2">
+                        {DEFAULT_RUN_KEYS.map((rk) => (
+                          <button key={rk} onClick={() => toggleActiveRunKey(rk)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${activeRunKeys.includes(rk) ? "bg-primary-100 text-primary-700 border border-primary-300" : "bg-gray-100 text-gray-400 border border-gray-200 line-through"}`}>
+                            {rk}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {activeRunKeys.map((rk) => (
+                          <span key={rk} className="px-2.5 py-1 bg-primary-50 text-primary-700 rounded-md text-xs font-medium">{rk}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Run Keys - Template Mapping */}
                 {selectedNumbers.length > 0 && (
                   <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
                     <div className="flex items-center justify-between mb-4">
@@ -215,7 +318,7 @@ export default function WorkshopConfigPage() {
                     </div>
 
                     <div className="space-y-2">
-                      {DEFAULT_RUN_KEYS.filter((rk) => rk.includes(runKeyFilter.toLowerCase())).map((runKey) => (
+                      {activeRunKeys.filter((rk) => rk.includes(runKeyFilter.toLowerCase())).map((runKey) => (
                         <div key={runKey} className="border border-gray-100 rounded-xl">
                           <button onClick={() => toggleRunKey(runKey)} className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors">
                             <span className="text-sm font-medium text-gray-900">{runKey}</span>
@@ -229,23 +332,48 @@ export default function WorkshopConfigPage() {
                                 const numName = config.numbers[numId]?.displayName || numId;
                                 const searchKey = `${runKey}_${numId}`;
                                 const tplSearch = tplSearches[searchKey] || "";
+                                const testResultKey = `${runKey}_${numId}`;
 
                                 return (
                                   <div key={numId} className="pl-4 border-l-3 border-primary-200">
-                                    <p className="text-xs font-medium text-gray-600 mb-2">{numName}</p>
+                                    <div className="flex items-center justify-between mb-2">
+                                      <p className="text-xs font-medium text-gray-600">{numName}</p>
+                                      {numConfig.templateName && (
+                                        <div className="flex items-center gap-2">
+                                          {testResults[testResultKey] && (
+                                            <span className={`text-[10px] font-medium ${testResults[testResultKey].startsWith("✓") ? "text-green-600" : "text-red-500"}`}>
+                                              {testResults[testResultKey]}
+                                            </span>
+                                          )}
+                                          <button
+                                            onClick={() => handleTestSend(runKey, numId)}
+                                            disabled={testingKey === testResultKey || !testPhone}
+                                            className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium bg-emerald-50 text-emerald-700 rounded-md hover:bg-emerald-100 border border-emerald-200 disabled:opacity-50 transition-all"
+                                          >
+                                            <Send className="w-2.5 h-2.5" />
+                                            {testingKey === testResultKey ? "..." : "Test"}
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
                                     
                                     {/* Searchable template dropdown */}
                                     <div className="relative mb-2">
                                       <div className="relative">
                                         <input
                                           type="text"
-                                          value={numConfig.templateName || tplSearch}
+                                          value={numConfig.templateName ? numConfig.templateName : tplSearch}
                                           onChange={(e) => {
-                                            setTplSearches({ ...tplSearches, [searchKey]: e.target.value });
-                                            if (numConfig.templateName) updateRunKeyTemplate(runKey, numId, "templateName", "");
+                                            const val = e.target.value;
+                                            if (numConfig.templateName) {
+                                              updateRunKeyTemplate(runKey, numId, "templateName", "");
+                                              setTplSearches((prev) => ({ ...prev, [searchKey]: val, [`${searchKey}_open`]: "1" }));
+                                            } else {
+                                              setTplSearches((prev) => ({ ...prev, [searchKey]: val, [`${searchKey}_open`]: "1" }));
+                                            }
                                           }}
-                                          onFocus={() => setTplSearches({ ...tplSearches, [`${searchKey}_open`]: "1" })}
-                                          onBlur={() => setTimeout(() => setTplSearches({ ...tplSearches, [`${searchKey}_open`]: "" }), 200)}
+                                          onFocus={() => setTplSearches((prev) => ({ ...prev, [`${searchKey}_open`]: "1" }))}
+                                          onBlur={() => setTimeout(() => setTplSearches((prev) => ({ ...prev, [`${searchKey}_open`]: "" })), 250)}
                                           placeholder="Search & select template..."
                                           className={`w-full border rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent ${numConfig.templateName ? "border-primary-300 bg-primary-50 font-medium pr-16" : "border-gray-200"}`}
                                         />
@@ -262,30 +390,28 @@ export default function WorkshopConfigPage() {
                                         <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
                                           {(templates[numId] || [])
                                             .filter((t) => t.templateName.includes((tplSearches[searchKey] || "").toLowerCase()))
-                                            .map((tpl) => {
-                                              return (
-                                                <button
-                                                  key={tpl.templateName}
-                                                  onMouseDown={(e) => {
-                                                    e.preventDefault();
-                                                    updateRunKeyTemplate(runKey, numId, "templateName", tpl.templateName);
-                                                    updateRunKeyTemplate(runKey, numId, "bodyParams", Array(tpl.parameterCount).fill(""));
-                                                    setTplSearches({ ...tplSearches, [searchKey]: "", [`${searchKey}_open`]: "" });
-                                                  }}
-                                                  className="w-full text-left px-3 py-2.5 hover:bg-primary-50 transition-colors border-b border-gray-50 last:border-0 flex items-center justify-between"
-                                                >
-                                                  <span>
-                                                    <span className="text-sm text-gray-900">{tpl.templateName}</span>
-                                                    <span className="text-xs text-gray-400 ml-2">({tpl.parameterCount}p)</span>
+                                            .map((tpl) => (
+                                              <button
+                                                key={tpl.templateName}
+                                                onMouseDown={(e) => {
+                                                  e.preventDefault();
+                                                  updateRunKeyTemplate(runKey, numId, "templateName", tpl.templateName);
+                                                  updateRunKeyTemplate(runKey, numId, "bodyParams", Array(tpl.parameterCount).fill(""));
+                                                  setTplSearches((prev) => ({ ...prev, [searchKey]: "", [`${searchKey}_open`]: "" }));
+                                                }}
+                                                className="w-full text-left px-3 py-2.5 hover:bg-primary-50 transition-colors border-b border-gray-50 last:border-0 flex items-center justify-between"
+                                              >
+                                                <span>
+                                                  <span className="text-sm text-gray-900">{tpl.templateName}</span>
+                                                  <span className="text-xs text-gray-400 ml-2">({tpl.parameterCount}p)</span>
+                                                </span>
+                                                {tpl.category && (
+                                                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide ${tpl.category === "MARKETING" ? "bg-orange-100 text-orange-700" : "bg-green-100 text-green-700"}`}>
+                                                    {tpl.category === "MARKETING" ? "MKT" : "UTL"}
                                                   </span>
-                                                  {tpl.category && (
-                                                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide ${tpl.category === "MARKETING" ? "bg-orange-100 text-orange-700" : "bg-green-100 text-green-700"}`}>
-                                                      {tpl.category === "MARKETING" ? "MKT" : "UTL"}
-                                                    </span>
-                                                  )}
-                                                </button>
-                                              );
-                                            })}
+                                                )}
+                                              </button>
+                                            ))}
                                           {(templates[numId] || []).filter((t) => t.templateName.includes((tplSearches[searchKey] || "").toLowerCase())).length === 0 && (
                                             <p className="px-3 py-3 text-xs text-gray-400 text-center">No templates found</p>
                                           )}
@@ -293,15 +419,22 @@ export default function WorkshopConfigPage() {
                                       )}
                                     </div>
 
-                                    {/* Template body preview */}
+                                    {/* Template body preview with sample data */}
                                     {numConfig.templateName && (() => {
                                       const tpl = (templates[numId] || []).find((t) => t.templateName === numConfig.templateName);
                                       const bodyText = tpl?.components?.find((c) => (c.type as string).toUpperCase() === "BODY")?.text;
-                                      return bodyText ? (
+                                      if (!bodyText) return null;
+                                      const previewText = bodyText.replace(/\{\{(\d+)\}\}/g, (_, num) => {
+                                        const idx = parseInt(num) - 1;
+                                        const paramKey = (numConfig.bodyParams || [])[idx];
+                                        if (!paramKey) return `[param ${num}]`;
+                                        return getParamSampleValue(paramKey);
+                                      });
+                                      return (
                                         <div className="mb-3 p-3 bg-gradient-to-r from-slate-50 to-gray-50 rounded-lg text-xs text-gray-600 whitespace-pre-wrap border border-gray-100 leading-relaxed">
-                                          {bodyText}
+                                          {previewText}
                                         </div>
-                                      ) : null;
+                                      );
                                     })()}
 
                                     {/* Params */}
@@ -320,11 +453,17 @@ export default function WorkshopConfigPage() {
                                                 type="text"
                                                 value={param ? displayValue : paramSearch}
                                                 onChange={(e) => {
-                                                  setTplSearches({ ...tplSearches, [paramSearchKey]: e.target.value });
-                                                  if (param) { const p = [...(numConfig.bodyParams || [])]; p[idx] = ""; updateRunKeyTemplate(runKey, numId, "bodyParams", p); }
+                                                  const val = e.target.value;
+                                                  if (param) {
+                                                    const p = [...(numConfig.bodyParams || [])]; p[idx] = "";
+                                                    updateRunKeyTemplate(runKey, numId, "bodyParams", p);
+                                                    setTplSearches((prev) => ({ ...prev, [paramSearchKey]: val, [`${paramSearchKey}_open`]: "1" }));
+                                                  } else {
+                                                    setTplSearches((prev) => ({ ...prev, [paramSearchKey]: val, [`${paramSearchKey}_open`]: "1" }));
+                                                  }
                                                 }}
-                                                onFocus={() => setTplSearches({ ...tplSearches, [`${paramSearchKey}_open`]: "1" })}
-                                                onBlur={() => setTimeout(() => setTplSearches({ ...tplSearches, [`${paramSearchKey}_open`]: "" }), 200)}
+                                                onFocus={() => setTplSearches((prev) => ({ ...prev, [`${paramSearchKey}_open`]: "1" }))}
+                                                onBlur={() => setTimeout(() => setTplSearches((prev) => ({ ...prev, [`${paramSearchKey}_open`]: "" })), 250)}
                                                 placeholder="param..."
                                                 className={`w-28 border-0 bg-transparent rounded-lg px-2 py-1.5 text-xs font-medium focus:ring-0 ${param ? "text-gray-900" : "text-gray-400"}`}
                                               />
@@ -342,7 +481,7 @@ export default function WorkshopConfigPage() {
                                                       e.preventDefault();
                                                       const params = [...(numConfig.bodyParams || [])]; params[idx] = p;
                                                       updateRunKeyTemplate(runKey, numId, "bodyParams", params);
-                                                      setTplSearches({ ...tplSearches, [paramSearchKey]: "", [`${paramSearchKey}_open`]: "" });
+                                                      setTplSearches((prev) => ({ ...prev, [paramSearchKey]: "", [`${paramSearchKey}_open`]: "" }));
                                                     }}
                                                     className="w-full text-left px-3 py-1.5 text-xs hover:bg-primary-50 transition-colors"
                                                   >
