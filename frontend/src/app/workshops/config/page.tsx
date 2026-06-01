@@ -251,30 +251,44 @@ export default function WorkshopConfigPage() {
                                   <div key={numId} className="pl-4 border-l-3 border-primary-200">
                                     <p className="text-xs font-medium text-gray-600 mb-2">{numName}</p>
                                     
-                                    {/* Template search + select */}
+                                    {/* Searchable template dropdown */}
                                     <div className="relative mb-2">
-                                      <Search className="w-3 h-3 absolute left-2.5 top-2.5 text-gray-400" />
                                       <input
                                         type="text"
-                                        value={tplSearch}
-                                        onChange={(e) => setTplSearches({ ...tplSearches, [searchKey]: e.target.value })}
-                                        placeholder="Search templates..."
-                                        className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-primary-500 mb-1"
-                                      />
-                                      <select
-                                        value={numConfig.templateName}
+                                        value={numConfig.templateName || tplSearch}
                                         onChange={(e) => {
-                                          updateRunKeyTemplate(runKey, numId, "templateName", e.target.value);
-                                          const tpl = (templates[numId] || []).find((t) => t.templateName === e.target.value);
-                                          if (tpl) updateRunKeyTemplate(runKey, numId, "bodyParams", Array(tpl.parameterCount).fill(""));
+                                          setTplSearches({ ...tplSearches, [searchKey]: e.target.value });
+                                          // Clear selection if typing
+                                          if (numConfig.templateName) updateRunKeyTemplate(runKey, numId, "templateName", "");
                                         }}
-                                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"
-                                      >
-                                        <option value="">— Select template —</option>
-                                        {(templates[numId] || []).filter((t) => t.templateName.includes(tplSearch.toLowerCase())).map((tpl) => (
-                                          <option key={tpl.templateName} value={tpl.templateName}>{tpl.templateName} ({tpl.parameterCount}p)</option>
-                                        ))}
-                                      </select>
+                                        onFocus={() => setTplSearches({ ...tplSearches, [`${searchKey}_open`]: "1" })}
+                                        onBlur={() => setTimeout(() => setTplSearches({ ...tplSearches, [`${searchKey}_open`]: "" }), 200)}
+                                        placeholder="Search & select template..."
+                                        className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                      />
+                                      {tplSearches[`${searchKey}_open`] && !numConfig.templateName && (
+                                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                                          {(templates[numId] || [])
+                                            .filter((t) => t.templateName.includes((tplSearches[searchKey] || "").toLowerCase()))
+                                            .map((tpl) => (
+                                              <button
+                                                key={tpl.templateName}
+                                                onMouseDown={(e) => {
+                                                  e.preventDefault();
+                                                  updateRunKeyTemplate(runKey, numId, "templateName", tpl.templateName);
+                                                  updateRunKeyTemplate(runKey, numId, "bodyParams", Array(tpl.parameterCount).fill(""));
+                                                  setTplSearches({ ...tplSearches, [searchKey]: "", [`${searchKey}_open`]: "" });
+                                                }}
+                                                className="w-full text-left px-3 py-2 text-sm hover:bg-primary-50 hover:text-primary-700 transition-colors"
+                                              >
+                                                {tpl.templateName} <span className="text-gray-400">({tpl.parameterCount}p)</span>
+                                              </button>
+                                            ))}
+                                          {(templates[numId] || []).filter((t) => t.templateName.includes((tplSearches[searchKey] || "").toLowerCase())).length === 0 && (
+                                            <p className="px-3 py-2 text-xs text-gray-400">No templates found</p>
+                                          )}
+                                        </div>
+                                      )}
                                     </div>
 
                                     {/* Template preview */}
