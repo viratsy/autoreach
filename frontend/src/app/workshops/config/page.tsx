@@ -280,22 +280,54 @@ export default function WorkshopConfigPage() {
 
                                     {/* Params */}
                                     <div className="flex flex-wrap gap-1.5 items-center">
-                                      {(numConfig.bodyParams || []).map((param, idx) => (
-                                        <div key={idx} className="flex items-center bg-white rounded-lg border border-gray-200 shadow-sm">
-                                          <select value={param} onChange={(e) => {
-                                            const p = [...(numConfig.bodyParams || [])]; p[idx] = e.target.value;
-                                            updateRunKeyTemplate(runKey, numId, "bodyParams", p);
-                                          }} className="border-0 bg-transparent rounded-lg px-2 py-1.5 text-xs font-medium focus:ring-0 appearance-none pr-6 cursor-pointer">
-                                            <option value="">select...</option>
-                                            {[...DB_PARAMS, ...COMPUTED_PARAMS].map((pk) => <option key={pk} value={pk}>{pk}</option>)}
-                                            {Object.keys(config.customParams || {}).length > 0 && Object.keys(config.customParams || {}).map((pk) => <option key={pk} value={`__CUSTOM__${pk}`}>⚡ {pk}</option>)}
-                                          </select>
-                                          <button onClick={() => {
-                                            const p = [...(numConfig.bodyParams || [])]; p.splice(idx, 1);
-                                            updateRunKeyTemplate(runKey, numId, "bodyParams", p);
-                                          }} className="text-red-300 hover:text-red-500 pr-2"><Trash2 className="w-3 h-3" /></button>
-                                        </div>
-                                      ))}
+                                      {(numConfig.bodyParams || []).map((param, idx) => {
+                                        const paramSearchKey = `param_${runKey}_${numId}_${idx}`;
+                                        const paramSearch = tplSearches[paramSearchKey] || "";
+                                        const paramOpen = tplSearches[`${paramSearchKey}_open`];
+                                        const allParams = [...DB_PARAMS, ...COMPUTED_PARAMS, ...Object.keys(config.customParams || {}).map((k) => `__CUSTOM__${k}`)];
+                                        const displayValue = param.startsWith("__CUSTOM__") ? `⚡ ${param.replace("__CUSTOM__", "")}` : param;
+
+                                        return (
+                                          <div key={idx} className="relative">
+                                            <div className="flex items-center bg-white rounded-lg border border-gray-200 shadow-sm">
+                                              <input
+                                                type="text"
+                                                value={param ? displayValue : paramSearch}
+                                                onChange={(e) => {
+                                                  setTplSearches({ ...tplSearches, [paramSearchKey]: e.target.value });
+                                                  if (param) { const p = [...(numConfig.bodyParams || [])]; p[idx] = ""; updateRunKeyTemplate(runKey, numId, "bodyParams", p); }
+                                                }}
+                                                onFocus={() => setTplSearches({ ...tplSearches, [`${paramSearchKey}_open`]: "1" })}
+                                                onBlur={() => setTimeout(() => setTplSearches({ ...tplSearches, [`${paramSearchKey}_open`]: "" }), 200)}
+                                                placeholder="param..."
+                                                className={`w-28 border-0 bg-transparent rounded-lg px-2 py-1.5 text-xs font-medium focus:ring-0 ${param ? "text-gray-900" : "text-gray-400"}`}
+                                              />
+                                              <button onClick={() => {
+                                                const p = [...(numConfig.bodyParams || [])]; p.splice(idx, 1);
+                                                updateRunKeyTemplate(runKey, numId, "bodyParams", p);
+                                              }} className="text-red-300 hover:text-red-500 pr-2"><Trash2 className="w-3 h-3" /></button>
+                                            </div>
+                                            {paramOpen && !param && (
+                                              <div className="absolute z-50 w-44 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-40 overflow-y-auto">
+                                                {allParams.filter((p) => p.toLowerCase().includes(paramSearch.toLowerCase())).map((p) => (
+                                                  <button
+                                                    key={p}
+                                                    onMouseDown={(e) => {
+                                                      e.preventDefault();
+                                                      const params = [...(numConfig.bodyParams || [])]; params[idx] = p;
+                                                      updateRunKeyTemplate(runKey, numId, "bodyParams", params);
+                                                      setTplSearches({ ...tplSearches, [paramSearchKey]: "", [`${paramSearchKey}_open`]: "" });
+                                                    }}
+                                                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-primary-50 transition-colors"
+                                                  >
+                                                    {p.startsWith("__CUSTOM__") ? `⚡ ${p.replace("__CUSTOM__", "")}` : p}
+                                                  </button>
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
                                       <button onClick={() => updateRunKeyTemplate(runKey, numId, "bodyParams", [...(numConfig.bodyParams || []), ""])} className="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-0.5 px-2 py-1.5 rounded-lg hover:bg-primary-50 border border-dashed border-primary-200">
                                         <Plus className="w-3 h-3" /> param
                                       </button>
