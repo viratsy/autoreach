@@ -194,32 +194,6 @@ export default function WorkshopConfigPage() {
                   </div>
                 </div>
 
-                {/* Custom Params */}
-                <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-1 uppercase tracking-wide">Static Parameters</h3>
-                  <p className="text-xs text-gray-400 mb-4">Custom values available in template mapping</p>
-                  
-                  <div className="space-y-2 mb-4">
-                    {Object.entries(config.customParams || {}).map(([key, value]) => (
-                      <div key={key} className="flex items-start gap-3 group">
-                        <span className="text-xs font-mono bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 px-3 py-1.5 rounded-lg border border-blue-100 min-w-[120px] mt-0.5">{key}</span>
-                        <textarea value={value} onChange={(e) => { setConfig({ ...config, customParams: { ...(config.customParams || {}), [key]: e.target.value } }); }} rows={1} className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm resize-y focus:ring-2 focus:ring-primary-500 focus:border-transparent" />
-                        <button onClick={() => { const cp = { ...(config.customParams || {}) }; delete cp[key]; setConfig({ ...config, customParams: cp }); }} className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 mt-1 transition-opacity"><Trash2 className="w-4 h-4" /></button>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <input type="text" value={newParamKey} onChange={(e) => setNewParamKey(e.target.value)} placeholder="key_name" className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-36 focus:ring-2 focus:ring-primary-500" />
-                    <input type="text" value={newParamValue} onChange={(e) => setNewParamValue(e.target.value)} placeholder="Static value..." className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500" />
-                    <button onClick={() => { if (newParamKey.trim()) { setConfig({ ...config, customParams: { ...(config.customParams || {}), [newParamKey.trim()]: newParamValue } }); setNewParamKey(""); setNewParamValue(""); } }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"><Plus className="w-4 h-4" /></button>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-1.5">
-                    {DB_PARAMS.map((p) => <span key={p} className="text-[10px] bg-green-50 text-green-700 px-2 py-0.5 rounded-full border border-green-100">{p}</span>)}
-                    {COMPUTED_PARAMS.map((p) => <span key={p} className="text-[10px] bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full border border-purple-100">{p}</span>)}
-                    {Object.keys(config.customParams || {}).map((p) => <span key={p} className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full border border-blue-100">{p}</span>)}
-                  </div>
-                </div>
-
                 {/* Run Keys */}
                 {selectedNumbers.length > 0 && (
                   <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
