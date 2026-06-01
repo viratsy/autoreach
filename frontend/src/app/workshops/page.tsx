@@ -219,10 +219,10 @@ export default function WorkshopsPage() {
                       </select>
                       <div className="flex bg-white border border-gray-200 rounded-lg p-0.5">
                         <button onClick={() => setUploadMode("current")} className={`px-3 py-1 text-xs font-medium rounded-md ${uploadMode === "current" ? "bg-gray-900 text-white" : "text-gray-500"}`}>
-                          Current (waiting)
+                          Current Batch (counter=0)
                         </button>
                         <button onClick={() => setUploadMode("next")} className={`px-3 py-1 text-xs font-medium rounded-md ${uploadMode === "next" ? "bg-primary-600 text-white" : "text-gray-500"}`}>
-                          Next (active, counter=1)
+                          Next Batch (counter=1)
                         </button>
                       </div>
                       {uploadData.length > 0 && (

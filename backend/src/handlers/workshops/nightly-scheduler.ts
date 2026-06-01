@@ -131,8 +131,18 @@ async function processActiveContacts(today: string) {
 
     console.log(`${eligible.length} eligible contacts for ${workshopName} re-engagement`);
 
-    // Get workshop config for this cycle
-    const cycle = eligible[0].counter + 1; // next cycle
+    // Group contacts by counter to handle different cycles
+    const byCounter: Record<number, typeof eligible> = {};
+    for (const contact of eligible) {
+      const c = contact.counter;
+      if (!byCounter[c]) byCounter[c] = [];
+      byCounter[c].push(contact);
+    }
+
+    for (const [counterStr, counterContacts] of Object.entries(byCounter)) {
+    const counter = Number(counterStr);
+    // counter=0 → Cycle 0 (current batch), counter=1 → Cycle 1, etc.
+    const cycle = counter;
     const configResult = await docClient.send(
       new GetCommand({
         TableName: process.env.WORKSHOP_CONFIG_TABLE || "autoreach-workshop-config-hardik",
@@ -167,8 +177,8 @@ async function processActiveContacts(today: string) {
           const contactBatches: { contacts: { phone: string; name: string; [key: string]: string }[]; phoneNumberId: string; templateName: string; bodyParams: string[] }[] = [];
 
           // Distribute contacts round-robin across numbers
-          const perNumber: Record<string, typeof eligible> = {};
-          eligible.forEach((contact, i) => {
+          const perNumber: Record<string, typeof counterContacts> = {};
+          counterContacts.forEach((contact, i) => {
             const numId = numbers[i % numbers.length];
             if (!perNumber[numId]) perNumber[numId] = [];
             perNumber[numId].push(contact);
@@ -239,12 +249,13 @@ async function processActiveContacts(today: string) {
             );
           }
 
-          console.log(`Queued ${runKey} for ${eligible.length} contacts across ${numbers.length} numbers`);
+          console.log(`Queued ${runKey} for ${counterContacts.length} contacts across ${numbers.length} numbers`);
         }
       }
     }
 
-    for (const contact of eligible) {
+    // Increment counters for this batch of contacts
+    for (const contact of counterContacts) {
       const newCounter = (contact.counter || 0) + 1;
       const isCompleted = newCounter >= 4;
       const ttl = isCompleted ? Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60 : undefined;
@@ -271,7 +282,8 @@ async function processActiveContacts(today: string) {
       );
     }
 
-    console.log(`Incremented counters for ${eligible.length} contacts in ${workshopName}`);
+    console.log(`Incremented counters for ${counterContacts.length} contacts (cycle ${cycle}) in ${workshopName}`);
+    } // end for byCounter
   }
 }
 

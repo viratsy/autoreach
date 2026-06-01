@@ -67,7 +67,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       const item: Record<string, unknown> = {
         PK: `PHONE#${phone}`,
         SK: `WS#${wsCode}`,
-        GSI1PK: mode === "current" ? "STATUS#waiting" : "STATUS#active",
+        GSI1PK: "STATUS#active",
         GSI1SK: `WS#${wsCode}#PHONE#${phone}`,
         name: contact.name || "",
         phone,
@@ -75,7 +75,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         workshopName,
         wsCode,
         counter: mode === "current" ? 0 : 1,
-        status: mode === "current" ? "waiting" : "active",
+        status: "active",
         firstBatchDate: contact.workshop_date || "",
         lastBatchDate: "",
         registeredAt: now,
