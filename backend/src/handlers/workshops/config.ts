@@ -79,7 +79,7 @@ async function getConfig(event: { queryStringParameters?: Record<string, string 
 async function saveConfig(event: { body?: string | null }, origin?: string) {
   try {
     const body = JSON.parse(event.body || "{}");
-    const { wsCode, workshopName, cycle, businessId, numbers, runKeys } = body;
+    const { wsCode, workshopName, cycle, businessId, numbers, runKeys, customParams } = body;
 
     if (!wsCode || cycle === undefined) {
       return error(400, "wsCode and cycle are required", origin);
@@ -92,8 +92,9 @@ async function saveConfig(event: { body?: string | null }, origin?: string) {
       workshopName: workshopName || "",
       cycle: Number(cycle),
       businessId: businessId || "",
-      numbers: numbers || {},  // { phoneNumberId: { displayName, ... } }
-      runKeys: runKeys || {},  // { run_key: { numbers: { phoneNumberId: { templateName, bodyParams, imageType } } } }
+      numbers: numbers || {},
+      runKeys: runKeys || {},
+      customParams: customParams || {},
       updatedAt: new Date().toISOString(),
     };
 
