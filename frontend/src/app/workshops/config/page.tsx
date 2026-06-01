@@ -182,28 +182,27 @@ export default function WorkshopConfigPage() {
                 <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
                   <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wide">Sending Numbers</h3>
                   {!config.businessId ? (
-                    <div>
-                      <p className="text-xs text-gray-500 mb-3">Select a business first:</p>
-                      <div className="flex gap-2">
-                        {businesses.map((biz) => (
-                          <button key={biz.businessId} onClick={() => setConfig({ ...config, businessId: biz.businessId })} className="px-4 py-2 bg-primary-50 text-primary-700 rounded-lg text-sm font-medium hover:bg-primary-100 border border-primary-200">
-                            {biz.businessName}
-                          </button>
-                        ))}
-                      </div>
+                    <div className="flex flex-wrap gap-3">
+                      <p className="text-sm text-gray-500 w-full mb-2">Select a business:</p>
+                      {businesses.map((biz) => (
+                        <button key={biz.businessId} onClick={() => setConfig({ ...config, businessId: biz.businessId })} className="px-4 py-2 bg-primary-50 text-primary-700 rounded-xl text-sm font-medium hover:bg-primary-100 border border-primary-200">
+                          {biz.businessName}
+                        </button>
+                      ))}
                     </div>
                   ) : (
-                  <div className="flex flex-wrap gap-3">
-                    {businesses.find((b) => b.businessId === config.businessId)?.phoneNumbers.map((pn) => (
-                      <label key={pn.phoneNumberId} className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 cursor-pointer transition-all ${selectedNumbers.includes(pn.phoneNumberId) ? "border-primary-500 bg-primary-50 shadow-sm" : "border-gray-100 hover:border-gray-300"}`}>
-                        <input type="checkbox" checked={selectedNumbers.includes(pn.phoneNumberId)} onChange={() => toggleNumber(pn.phoneNumberId, pn.displayName)} className="w-4 h-4 text-primary-600 rounded" />
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">{pn.displayName}</p>
-                          <p className="text-xs text-gray-400">{pn.displayNumber}</p>
-                        </div>
-                      </label>
-                    ))}
-                  </div>
+                    <div className="flex flex-wrap gap-3">
+                      {businesses.find((b) => b.businessId === config.businessId)?.phoneNumbers.map((pn) => (
+                        <label key={pn.phoneNumberId} className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 cursor-pointer transition-all ${selectedNumbers.includes(pn.phoneNumberId) ? "border-primary-500 bg-primary-50 shadow-sm" : "border-gray-100 hover:border-gray-300"}`}>
+                          <input type="checkbox" checked={selectedNumbers.includes(pn.phoneNumberId)} onChange={() => toggleNumber(pn.phoneNumberId, pn.displayName)} className="w-4 h-4 text-primary-600 rounded" />
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{pn.displayName}</p>
+                            <p className="text-xs text-gray-400">{pn.displayNumber}</p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Run Keys */}
