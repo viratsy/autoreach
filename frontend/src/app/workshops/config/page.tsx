@@ -36,6 +36,7 @@ interface TemplateItem {
   templateName: string;
   parameterCount: number;
   components: { type: string; text?: string }[];
+  category?: string;
 }
 
 const WORKSHOP_CODES = ["aitools", "msai", "aidash", "aibuild"];
@@ -59,8 +60,6 @@ export default function WorkshopConfigPage() {
   const [templates, setTemplates] = useState<Record<string, TemplateItem[]>>({});
   const [expandedRunKeys, setExpandedRunKeys] = useState<Set<string>>(new Set(["2days_to_go"]));
   const [runKeyFilter, setRunKeyFilter] = useState("");
-  const [newParamKey, setNewParamKey] = useState("");
-  const [newParamValue, setNewParamValue] = useState("");
   const [tplSearches, setTplSearches] = useState<Record<string, string>>({});
 
   useEffect(() => { apiRequest<{ businesses: Business[] }>("/businesses").then((d) => setBusinesses(d.businesses)); }, []);
@@ -76,7 +75,7 @@ export default function WorkshopConfigPage() {
           for (const tpl of data.templates) {
             for (const numId of tpl.availableOn) {
               if (!byNumber[numId]) byNumber[numId] = [];
-              byNumber[numId].push({ templateName: tpl.templateName, parameterCount: tpl.parameterCount, components: tpl.components });
+              byNumber[numId].push({ templateName: tpl.templateName, parameterCount: tpl.parameterCount, components: tpl.components, category: tpl.category });
             }
           }
           setTemplates(byNumber);
@@ -131,7 +130,6 @@ export default function WorkshopConfigPage() {
     setConfig({ wsCode, workshopName: wsCode, cycle, businessId, numbers: {}, runKeys: {}, customParams: {} });
   };
 
-  const allParamKeys = [...DB_PARAMS, ...COMPUTED_PARAMS, ...Object.keys(config?.customParams || {}).map((k) => `__CUSTOM__${k}`)];
 
   return (
     <AuthGuard>
@@ -238,18 +236,28 @@ export default function WorkshopConfigPage() {
                                     
                                     {/* Searchable template dropdown */}
                                     <div className="relative mb-2">
-                                      <input
-                                        type="text"
-                                        value={numConfig.templateName || tplSearch}
-                                        onChange={(e) => {
-                                          setTplSearches({ ...tplSearches, [searchKey]: e.target.value });
-                                          if (numConfig.templateName) updateRunKeyTemplate(runKey, numId, "templateName", "");
-                                        }}
-                                        onFocus={() => setTplSearches({ ...tplSearches, [`${searchKey}_open`]: "1" })}
-                                        onBlur={() => setTimeout(() => setTplSearches({ ...tplSearches, [`${searchKey}_open`]: "" }), 200)}
-                                        placeholder="Search & select template..."
-                                        className={`w-full border rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent ${numConfig.templateName ? "border-primary-300 bg-primary-50 font-medium" : "border-gray-200"}`}
-                                      />
+                                      <div className="relative">
+                                        <input
+                                          type="text"
+                                          value={numConfig.templateName || tplSearch}
+                                          onChange={(e) => {
+                                            setTplSearches({ ...tplSearches, [searchKey]: e.target.value });
+                                            if (numConfig.templateName) updateRunKeyTemplate(runKey, numId, "templateName", "");
+                                          }}
+                                          onFocus={() => setTplSearches({ ...tplSearches, [`${searchKey}_open`]: "1" })}
+                                          onBlur={() => setTimeout(() => setTplSearches({ ...tplSearches, [`${searchKey}_open`]: "" }), 200)}
+                                          placeholder="Search & select template..."
+                                          className={`w-full border rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent ${numConfig.templateName ? "border-primary-300 bg-primary-50 font-medium pr-16" : "border-gray-200"}`}
+                                        />
+                                        {numConfig.templateName && (() => {
+                                          const selTpl = (templates[numId] || []).find((t) => t.templateName === numConfig.templateName);
+                                          return selTpl?.category ? (
+                                            <span className={`absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide ${selTpl.category === "MARKETING" ? "bg-orange-100 text-orange-700" : "bg-green-100 text-green-700"}`}>
+                                              {selTpl.category === "MARKETING" ? "MKT" : "UTL"}
+                                            </span>
+                                          ) : null;
+                                        })()}
+                                      </div>
                                       {tplSearches[`${searchKey}_open`] && !numConfig.templateName && (
                                         <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
                                           {(templates[numId] || [])
@@ -264,10 +272,17 @@ export default function WorkshopConfigPage() {
                                                     updateRunKeyTemplate(runKey, numId, "bodyParams", Array(tpl.parameterCount).fill(""));
                                                     setTplSearches({ ...tplSearches, [searchKey]: "", [`${searchKey}_open`]: "" });
                                                   }}
-                                                  className="w-full text-left px-3 py-2.5 hover:bg-primary-50 transition-colors border-b border-gray-50 last:border-0"
+                                                  className="w-full text-left px-3 py-2.5 hover:bg-primary-50 transition-colors border-b border-gray-50 last:border-0 flex items-center justify-between"
                                                 >
-                                                  <span className="text-sm text-gray-900">{tpl.templateName}</span>
-                                                  <span className="text-xs text-gray-400 ml-2">({tpl.parameterCount}p)</span>
+                                                  <span>
+                                                    <span className="text-sm text-gray-900">{tpl.templateName}</span>
+                                                    <span className="text-xs text-gray-400 ml-2">({tpl.parameterCount}p)</span>
+                                                  </span>
+                                                  {tpl.category && (
+                                                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wide ${tpl.category === "MARKETING" ? "bg-orange-100 text-orange-700" : "bg-green-100 text-green-700"}`}>
+                                                      {tpl.category === "MARKETING" ? "MKT" : "UTL"}
+                                                    </span>
+                                                  )}
                                                 </button>
                                               );
                                             })}
