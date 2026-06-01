@@ -234,39 +234,55 @@ export default function WorkshopConfigPage() {
 
                 {/* Custom Static Params */}
                 <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
-                  <h3 className="font-semibold text-gray-900 mb-3">Custom Static Parameters</h3>
-                  <p className="text-xs text-gray-500 mb-3">Define static values that can be used in template parameters (e.g., notes, mentor name)</p>
+                  <h3 className="font-semibold text-gray-900 mb-1">Custom Static Parameters</h3>
+                  <p className="text-xs text-gray-500 mb-3">Define static values used in templates. These appear in the param dropdown when mapping.</p>
                   
-                  {Object.entries(config.customParams || {}).map(([key, value]) => (
-                    <div key={key} className="flex items-center gap-2 mb-2">
-                      <span className="text-xs font-mono bg-gray-100 px-2 py-1 rounded w-32 truncate">{key}</span>
-                      <input
-                        type="text"
-                        value={value}
-                        onChange={(e) => {
-                          const cp = { ...(config.customParams || {}), [key]: e.target.value };
+                  {/* Existing custom params - editable */}
+                  <div className="space-y-2 mb-3">
+                    {Object.entries(config.customParams || {}).map(([key, value]) => (
+                      <div key={key} className="flex items-start gap-2 bg-gray-50 p-2 rounded">
+                        <span className="text-xs font-mono bg-blue-100 text-blue-700 px-2 py-1 rounded min-w-[100px]">{key}</span>
+                        <textarea
+                          value={value}
+                          onChange={(e) => {
+                            const cp = { ...(config.customParams || {}), [key]: e.target.value };
+                            setConfig({ ...config, customParams: cp });
+                          }}
+                          rows={2}
+                          className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs resize-y"
+                        />
+                        <button onClick={() => {
+                          const cp = { ...(config.customParams || {}) };
+                          delete cp[key];
                           setConfig({ ...config, customParams: cp });
-                        }}
-                        className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs"
-                      />
-                      <button onClick={() => {
-                        const cp = { ...(config.customParams || {}) };
-                        delete cp[key];
-                        setConfig({ ...config, customParams: cp });
-                      }} className="text-red-400 hover:text-red-600"><Trash2 className="w-3 h-3" /></button>
-                    </div>
-                  ))}
+                        }} className="text-red-400 hover:text-red-600 mt-1"><Trash2 className="w-4 h-4" /></button>
+                      </div>
+                    ))}
+                  </div>
 
-                  <div className="flex items-center gap-2 mt-2">
-                    <input type="text" value={newParamKey} onChange={(e) => setNewParamKey(e.target.value)} placeholder="Key (e.g. notes_ai)" className="border border-gray-300 rounded px-2 py-1 text-xs w-32" />
-                    <input type="text" value={newParamValue} onChange={(e) => setNewParamValue(e.target.value)} placeholder="Value (static text)" className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs" />
+                  {/* Add new */}
+                  <div className="flex items-center gap-2 border-t border-gray-200 pt-3">
+                    <input type="text" value={newParamKey} onChange={(e) => setNewParamKey(e.target.value)} placeholder="Key name" className="border border-gray-300 rounded px-2 py-1.5 text-sm w-40" />
+                    <input type="text" value={newParamValue} onChange={(e) => setNewParamValue(e.target.value)} placeholder="Static value" className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm" />
                     <button onClick={() => {
                       if (newParamKey.trim()) {
                         const cp = { ...(config.customParams || {}), [newParamKey.trim()]: newParamValue };
                         setConfig({ ...config, customParams: cp });
                         setNewParamKey(""); setNewParamValue("");
                       }
-                    }} className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-0.5"><Plus className="w-3 h-3" /> Add</button>
+                    }} className="px-3 py-1.5 bg-blue-50 text-blue-700 rounded text-sm font-medium hover:bg-blue-100 flex items-center gap-1"><Plus className="w-3 h-3" /> Add</button>
+                  </div>
+
+                  {/* Reference: DB params */}
+                  <div className="mt-4 pt-3 border-t border-gray-200">
+                    <p className="text-xs text-gray-400 mb-1">Available from DB (auto-filled from registration):</p>
+                    <div className="flex flex-wrap gap-1">
+                      {DB_PARAMS.map((p) => <span key={p} className="text-xs bg-green-50 text-green-700 px-1.5 py-0.5 rounded">{p}</span>)}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-2 mb-1">Computed (auto-generated):</p>
+                    <div className="flex flex-wrap gap-1">
+                      {COMPUTED_PARAMS.map((p) => <span key={p} className="text-xs bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded">{p}</span>)}
+                    </div>
                   </div>
                 </div>
 
@@ -297,27 +313,41 @@ export default function WorkshopConfigPage() {
                               <div key={numId} className="pl-3 border-l-2 border-gray-200">
                                 <p className="text-xs text-gray-500 mb-1">{numName}</p>
                                 <div className="flex gap-2 mb-2">
-                                  <select
-                                    value={numConfig.templateName}
-                                    onChange={(e) => {
-                                      updateRunKeyTemplate(runKey, numId, "templateName", e.target.value);
-                                      const tpl = (templates[numId] || []).find((t) => t.templateName === e.target.value);
-                                      if (tpl) {
-                                        const params = Array(tpl.parameterCount).fill("");
-                                        updateRunKeyTemplate(runKey, numId, "bodyParams", params);
-                                      }
-                                    }}
-                                    className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm"
-                                  >
-                                    <option value="">Select template</option>
-                                    {(templates[numId] || [])
-                                      .filter((t) => t.templateName.toLowerCase().includes(templateSearch.toLowerCase()))
-                                      .map((tpl) => (
-                                      <option key={tpl.templateName} value={tpl.templateName}>
-                                        {tpl.templateName} ({tpl.parameterCount}p)
-                                      </option>
-                                    ))}
-                                  </select>
+                                  <div className="flex-1 relative">
+                                    <input
+                                      type="text"
+                                      placeholder="Search templates..."
+                                      onChange={(e) => {
+                                        // Store search per number+runkey
+                                        const key = `${runKey}_${numId}`;
+                                        (window as unknown as Record<string, string>)[`tplSearch_${key}`] = e.target.value;
+                                        // Force re-render
+                                        setTemplateSearch(e.target.value);
+                                      }}
+                                      className="w-full border border-gray-300 rounded px-2 py-1 text-xs mb-1"
+                                    />
+                                    <select
+                                      value={numConfig.templateName}
+                                      onChange={(e) => {
+                                        updateRunKeyTemplate(runKey, numId, "templateName", e.target.value);
+                                        const tpl = (templates[numId] || []).find((t) => t.templateName === e.target.value);
+                                        if (tpl) {
+                                          const params = Array(tpl.parameterCount).fill("");
+                                          updateRunKeyTemplate(runKey, numId, "bodyParams", params);
+                                        }
+                                      }}
+                                      className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                                    >
+                                      <option value="">Select template</option>
+                                      {(templates[numId] || [])
+                                        .filter((t) => t.templateName.toLowerCase().includes(templateSearch.toLowerCase()))
+                                        .map((tpl) => (
+                                        <option key={tpl.templateName} value={tpl.templateName}>
+                                          {tpl.templateName} ({tpl.parameterCount}p)
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
                                 </div>
                                 {/* Template preview */}
                                 {numConfig.templateName && (() => {
