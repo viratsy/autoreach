@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: AutoReach - WhatsApp Campaign Scheduler Backend v6
+Description: AutoReach - WhatsApp Campaign Scheduler Backend v7
 
 Globals:
   Function:
@@ -18,7 +18,7 @@ Globals:
         WEBHOOK_VERIFY_TOKEN: !Ref WebhookVerifyToken
         SES_FROM_EMAIL: !Ref SesFromEmail
         OTP_TABLE: !Ref OTPTable
-        REENGAGEMENT_TABLE: !Ref ReengagementTable
+        REENGAGEMENT_TABLE: "autoreach-reengagement-hardik"
         JWT_SECRET: !Ref WebhookVerifyToken
   Api:
     Cors:
@@ -164,38 +164,6 @@ Resources:
           KeyType: RANGE
       TimeToLiveSpecification:
         AttributeName: expiresAt
-        Enabled: true
-
-  ReengagementTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: !Sub "autoreach-reengagement-${EnvName}"
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: PK
-          AttributeType: S
-        - AttributeName: SK
-          AttributeType: S
-        - AttributeName: GSI1PK
-          AttributeType: S
-        - AttributeName: GSI1SK
-          AttributeType: S
-      KeySchema:
-        - AttributeName: PK
-          KeyType: HASH
-        - AttributeName: SK
-          KeyType: RANGE
-      GlobalSecondaryIndexes:
-        - IndexName: GSI1
-          KeySchema:
-            - AttributeName: GSI1PK
-              KeyType: HASH
-            - AttributeName: GSI1SK
-              KeyType: RANGE
-          Projection:
-            ProjectionType: ALL
-      TimeToLiveSpecification:
-        AttributeName: ttl
         Enabled: true
 
   # --- SQS ---
@@ -714,7 +682,7 @@ Resources:
       Handler: dist/handlers/workshops/register.handler
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref ReengagementTable
+            TableName: !Sub "autoreach-reengagement-${EnvName}"
       Events:
         Api:
           Type: Api
@@ -728,7 +696,7 @@ Resources:
       Handler: dist/handlers/workshops/list-contacts.handler
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref ReengagementTable
+            TableName: !Sub "autoreach-reengagement-${EnvName}"
       Events:
         Api:
           Type: Api
@@ -742,7 +710,7 @@ Resources:
       Handler: dist/handlers/workshops/stats.handler
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref ReengagementTable
+            TableName: !Sub "autoreach-reengagement-${EnvName}"
       Events:
         Api:
           Type: Api
@@ -756,13 +724,43 @@ Resources:
       Handler: dist/handlers/workshops/download.handler
       Policies:
         - DynamoDBCrudPolicy:
-            TableName: !Ref ReengagementTable
+            TableName: !Sub "autoreach-reengagement-${EnvName}"
       Events:
         Api:
           Type: Api
           Properties:
             Path: /workshops/download
             Method: GET
+
+  WorkshopNightlyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/workshops/nightly-scheduler.handler
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          MASTERCLASS_TABLE: "masterclass_lookup_key"
+          WORKSHOP_DB_TABLE: "WhatsAppDatabase"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-reengagement-${EnvName}"
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/masterclass_lookup_key"
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/WhatsAppDatabase"
+      Events:
+        NightlySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(30 19 * * ? *)
+            Description: "Workshop re-engagement nightly at 1 AM IST"
 
   MetaWebhookFunction:
     Type: AWS::Serverless::Function
@@ -790,3 +788,4 @@ Outputs:
   WebhookUrl:
     Description: Meta Webhook URL
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/webhooks/meta"
+
