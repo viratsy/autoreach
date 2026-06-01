@@ -7,6 +7,8 @@ Globals:
     Runtime: nodejs20.x
     Timeout: 30
     MemorySize: 256
+    Layers:
+      - !Ref DependenciesLayer
     Environment:
       Variables:
         BUSINESSES_TABLE: !Ref BusinessesTable
@@ -44,6 +46,18 @@ Parameters:
     Description: "SES verified sender email for OTP"
 
 Resources:
+  # --- Lambda Layer ---
+  DependenciesLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub "autoreach-deps-${EnvName}"
+      ContentUri: layers/dependencies/
+      CompatibleRuntimes:
+        - nodejs20.x
+      RetentionPolicy: Delete
+    Metadata:
+      BuildMethod: nodejs20.x
+
   # --- DynamoDB Tables ---
   BusinessesTable:
     Type: AWS::DynamoDB::Table

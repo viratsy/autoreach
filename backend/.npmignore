@@ -1,0 +1,11 @@
+src/
+layers/
+.next/
+.aws-sam/
+*.ts
+!dist/**/*.js
+tsconfig.json
+samconfig.toml
+template.yaml
+.samignore
+.npmignore
