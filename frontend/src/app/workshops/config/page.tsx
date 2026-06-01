@@ -29,15 +29,12 @@ interface WorkshopConfig {
   businessId: string;
   numbers: Record<string, { displayName: string }>;
   runKeys: Record<string, RunKeyConfig>;
+  customParams?: Record<string, string>;
 }
 
 const WORKSHOP_CODES = ["aitools", "msai", "aidash", "aibuild"];
-const PARAM_KEYS = [
-  "name", "zoom_link", "whatsapp_group", "workshop_name", "full_workshop_name",
-  "workshop_name_w", "workshop_date", "workshop_time", "workshop_time_short",
-  "workshop_date_time", "mentor_name", "w_type", "w_name",
-  "notes_ai", "notes_ms", "notes_aidash", "notes_aibuild", "three_hours_text",
-];
+const DB_PARAMS = ["name", "zoom_link", "whatsapp_group", "workshop_name", "workshop_date", "workshop_time"];
+const COMPUTED_PARAMS = ["full_workshop_name", "workshop_name_w", "workshop_date_time", "workshop_time_short", "mentor_name", "w_type", "w_name", "three_hours_text"];
 const DEFAULT_RUN_KEYS = [
   "2days_to_go", "1day_to_go", "9am_groupjoin", "1pm_group_join", "3pm_group_join",
   "60_mins_to_go", "20_mins_to_go", "we_are_live",
@@ -53,6 +50,9 @@ export default function WorkshopConfigPage() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
   const [selectedNumbers, setSelectedNumbers] = useState<string[]>([]);
+  const [templateSearch, setTemplateSearch] = useState("");
+  const [newParamKey, setNewParamKey] = useState("");
+  const [newParamValue, setNewParamValue] = useState("");
   const [templates, setTemplates] = useState<Record<string, { templateName: string; parameterCount: number; components: { type: string; text?: string }[] }[]>>({});
 
   useEffect(() => {
@@ -232,10 +232,61 @@ export default function WorkshopConfigPage() {
                   </div>
                 </div>
 
+                {/* Custom Static Params */}
+                <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
+                  <h3 className="font-semibold text-gray-900 mb-3">Custom Static Parameters</h3>
+                  <p className="text-xs text-gray-500 mb-3">Define static values that can be used in template parameters (e.g., notes, mentor name)</p>
+                  
+                  {Object.entries(config.customParams || {}).map(([key, value]) => (
+                    <div key={key} className="flex items-center gap-2 mb-2">
+                      <span className="text-xs font-mono bg-gray-100 px-2 py-1 rounded w-32 truncate">{key}</span>
+                      <input
+                        type="text"
+                        value={value}
+                        onChange={(e) => {
+                          const cp = { ...(config.customParams || {}), [key]: e.target.value };
+                          setConfig({ ...config, customParams: cp });
+                        }}
+                        className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs"
+                      />
+                      <button onClick={() => {
+                        const cp = { ...(config.customParams || {}) };
+                        delete cp[key];
+                        setConfig({ ...config, customParams: cp });
+                      }} className="text-red-400 hover:text-red-600"><Trash2 className="w-3 h-3" /></button>
+                    </div>
+                  ))}
+
+                  <div className="flex items-center gap-2 mt-2">
+                    <input type="text" value={newParamKey} onChange={(e) => setNewParamKey(e.target.value)} placeholder="Key (e.g. notes_ai)" className="border border-gray-300 rounded px-2 py-1 text-xs w-32" />
+                    <input type="text" value={newParamValue} onChange={(e) => setNewParamValue(e.target.value)} placeholder="Value (static text)" className="flex-1 border border-gray-300 rounded px-2 py-1 text-xs" />
+                    <button onClick={() => {
+                      if (newParamKey.trim()) {
+                        const cp = { ...(config.customParams || {}), [newParamKey.trim()]: newParamValue };
+                        setConfig({ ...config, customParams: cp });
+                        setNewParamKey(""); setNewParamValue("");
+                      }
+                    }} className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-0.5"><Plus className="w-3 h-3" /> Add</button>
+                  </div>
+                </div>
+
+                {/* Template Search */}
+                {selectedNumbers.length > 0 && (
+                  <div className="mb-4">
+                    <input
+                      type="text"
+                      value={templateSearch}
+                      onChange={(e) => setTemplateSearch(e.target.value)}
+                      placeholder="Search run keys..."
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </div>
+                )}
+
                 {/* Run Key Configs */}
                 {selectedNumbers.length > 0 && (
                   <div className="space-y-4">
-                    {DEFAULT_RUN_KEYS.map((runKey) => (
+                    {DEFAULT_RUN_KEYS.filter((rk) => rk.includes(templateSearch.toLowerCase())).map((runKey) => (
                       <div key={runKey} className="bg-white rounded-xl border border-gray-200 p-4">
                         <h4 className="font-medium text-gray-900 text-sm mb-3">{runKey}</h4>
                         <div className="space-y-3">
@@ -250,18 +301,18 @@ export default function WorkshopConfigPage() {
                                     value={numConfig.templateName}
                                     onChange={(e) => {
                                       updateRunKeyTemplate(runKey, numId, "templateName", e.target.value);
-                                      // Auto-fill params from template
                                       const tpl = (templates[numId] || []).find((t) => t.templateName === e.target.value);
                                       if (tpl) {
-                                        // Set empty params matching parameter count
                                         const params = Array(tpl.parameterCount).fill("");
                                         updateRunKeyTemplate(runKey, numId, "bodyParams", params);
                                       }
                                     }}
-                                    className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm"
+                                    className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm"
                                   >
                                     <option value="">Select template</option>
-                                    {(templates[numId] || []).map((tpl) => (
+                                    {(templates[numId] || [])
+                                      .filter((t) => t.templateName.toLowerCase().includes(templateSearch.toLowerCase()))
+                                      .map((tpl) => (
                                       <option key={tpl.templateName} value={tpl.templateName}>
                                         {tpl.templateName} ({tpl.parameterCount}p)
                                       </option>
@@ -281,7 +332,17 @@ export default function WorkshopConfigPage() {
                                     <div key={idx} className="flex items-center gap-1">
                                       <select value={param} onChange={(e) => updateParam(runKey, numId, idx, e.target.value)} className="border border-gray-200 rounded px-1 py-0.5 text-xs">
                                         <option value="">--</option>
-                                        {PARAM_KEYS.map((pk) => <option key={pk} value={pk}>{pk}</option>)}
+                                        <optgroup label="From DB">
+                                          {DB_PARAMS.map((pk) => <option key={pk} value={pk}>{pk}</option>)}
+                                        </optgroup>
+                                        <optgroup label="Computed">
+                                          {COMPUTED_PARAMS.map((pk) => <option key={pk} value={pk}>{pk}</option>)}
+                                        </optgroup>
+                                        {config && Object.keys(config.customParams || {}).length > 0 && (
+                                          <optgroup label="Custom Static">
+                                            {Object.keys(config.customParams || {}).map((pk) => <option key={pk} value={`__CUSTOM__${pk}`}>{pk} (static)</option>)}
+                                          </optgroup>
+                                        )}
                                       </select>
                                       <button onClick={() => removeParam(runKey, numId, idx)} className="text-red-400 hover:text-red-600"><Trash2 className="w-3 h-3" /></button>
                                     </div>
