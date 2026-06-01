@@ -17,6 +17,7 @@ const navItems = [
   { href: "/campaigns/", label: "Campaigns", icon: Send },
   { href: "/campaigns/new/", label: "New Campaign", icon: PlusCircle },
   { href: "/workshops/", label: "Workshops", icon: CalendarClock },
+  { href: "/workshops/config/", label: "WS Config", icon: CalendarClock },
   { href: "/templates/", label: "Templates", icon: FileText },
   { href: "/businesses/", label: "Businesses", icon: Building2 },
 ];

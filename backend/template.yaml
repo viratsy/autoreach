@@ -718,6 +718,33 @@ Resources:
             Path: /workshops/stats
             Method: GET
 
+  WorkshopConfigFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/workshops/config.handler
+      Environment:
+        Variables:
+          WORKSHOP_CONFIG_TABLE: !Sub "autoreach-workshop-config-${EnvName}"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-workshop-config-${EnvName}"
+      Events:
+        GetApi:
+          Type: Api
+          Properties:
+            Path: /workshops/config
+            Method: GET
+        PutApi:
+          Type: Api
+          Properties:
+            Path: /workshops/config
+            Method: PUT
+        ListApi:
+          Type: Api
+          Properties:
+            Path: /workshops/config/list
+            Method: GET
+
   WorkshopDownloadFunction:
     Type: AWS::Serverless::Function
     Properties:
