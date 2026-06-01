@@ -153,17 +153,13 @@ function CampaignViewContent() {
                     const total = metrics.total;
                     const failed = metrics.failed;
                     const queued = metrics.queued;
+                    const skipped = (metrics as unknown as { skipped?: number }).skipped || 0;
                     
-                    // Cumulative: sent = everything not failed/queued
-                    const sent = total - failed - queued;
-                    // If backend already returns cumulative delivered (includes read), use as-is
-                    // If backend returns exclusive counts, add them up
-                    // Check: if delivered + read + failed + queued + sent_only > total, backend is cumulative
+                    // Cumulative: sent = everything not failed/queued/skipped
+                    const sent = total - failed - queued - skipped;
                     const delivered = metrics.delivered > metrics.read ? metrics.delivered : metrics.delivered + metrics.read;
                     const read = metrics.read;
                     const replied = metrics.replied;
-
-                    // Ensure delivered doesn't exceed sent
                     const safeDelivered = Math.min(delivered, sent);
 
                     const items = [
@@ -172,8 +168,8 @@ function CampaignViewContent() {
                       { label: "Delivered", value: safeDelivered, icon: CheckCircle, color: "text-green-600", pct: sent ? Math.round((safeDelivered / sent) * 100) : 0 },
                       { label: "Read", value: read, icon: Eye, color: "text-purple-600", pct: safeDelivered ? Math.round((read / safeDelivered) * 100) : 0 },
                       { label: "Failed", value: failed, icon: XCircle, color: "text-red-600", pct: total ? Math.round((failed / total) * 100) : 0 },
+                      { label: "Skipped", value: skipped, icon: XCircle, color: "text-orange-500", pct: null },
                       { label: "Replied", value: replied, icon: MessageSquare, color: "text-indigo-600", pct: safeDelivered ? Math.round((replied / safeDelivered) * 100) : 0 },
-                      { label: "Queued", value: queued, icon: Send, color: "text-gray-400", pct: null },
                     ];
 
                     return items.map((m) => (

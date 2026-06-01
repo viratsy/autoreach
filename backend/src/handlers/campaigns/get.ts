@@ -52,6 +52,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       read: readCount,
       failed: failedCount,
       replied: repliedCount,
+      skipped: messages.filter((m) => m.status === "skipped").length,
       queued: messages.filter((m) => m.status === "queued").length,
     };
 
