@@ -194,6 +194,15 @@ export default function WorkshopConfigPage() {
 
   const activeRunKeys = config?.activeRunKeys || DEFAULT_RUN_KEYS;
 
+  const copyParamsFromFirst = (runKey: string, targetNumId: string) => {
+    if (!config) return;
+    const firstNumId = selectedNumbers.find((nId) => nId !== targetNumId && config.runKeys[runKey]?.numbers[nId]?.bodyParams?.length > 0);
+    if (!firstNumId) { setToast("No mapped params to copy from"); return; }
+    const sourceParams = config.runKeys[runKey].numbers[firstNumId].bodyParams;
+    updateRunKeyTemplate(runKey, targetNumId, "bodyParams", [...sourceParams]);
+    setToast("✓ Params copied");
+  };
+
   return (
     <AuthGuard>
       <div className="flex h-screen">
@@ -344,6 +353,14 @@ export default function WorkshopConfigPage() {
                                             <span className={`text-[10px] font-medium ${testResults[testResultKey].startsWith("✓") ? "text-green-600" : "text-red-500"}`}>
                                               {testResults[testResultKey]}
                                             </span>
+                                          )}
+                                          {selectedNumbers.indexOf(numId) > 0 && (
+                                            <button
+                                              onClick={() => copyParamsFromFirst(runKey, numId)}
+                                              className="px-2 py-1 text-[10px] font-medium bg-gray-100 text-gray-600 rounded-md hover:bg-gray-200 border border-gray-200 transition-all"
+                                            >
+                                              Copy params ↑
+                                            </button>
                                           )}
                                           <button
                                             onClick={() => handleTestSend(runKey, numId)}

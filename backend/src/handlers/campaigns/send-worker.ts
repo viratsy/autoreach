@@ -2,6 +2,7 @@ import { SQSHandler } from "aws-lambda";
 import { PutCommand, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, TABLES } from "../../lib/dynamo";
 import { CSVContact } from "../../lib/types";
+import { createNotification } from "../notifications/index";
 
 /**
  * Worker: Processes a batch of ~200 contacts from SQS.
@@ -49,6 +50,17 @@ export const handler: SQSHandler = async (event) => {
         const data = (await res.json()) as { data?: { category: string }[] };
         if (data.data?.[0]?.category === "MARKETING") {
           console.error(`STOPPED: Template "${templateName}" is MARKETING on ${phoneNumberId}. Skipping batch.`);
+          // Create notification
+          await createNotification({
+            type: "template_marketing",
+            businessId: campaignId.split("_")[0] || "",
+            businessName: batch.displayName || "",
+            phoneNumberId,
+            phoneDisplayName: batch.displayName || phoneNumberId,
+            templateName,
+            errorMessage: `Template "${templateName}" moved to MARKETING category. Campaign aborted.`,
+            campaignId,
+          });
           // Update campaign status
           await docClient.send(
             new UpdateCommand({
@@ -176,6 +188,7 @@ export const handler: SQSHandler = async (event) => {
           );
         } else {
           // Store failure
+          const errMsg = data.error?.message || "Unknown";
           await docClient.send(
             new PutCommand({
               TableName: TABLES.MESSAGES,
@@ -188,12 +201,25 @@ export const handler: SQSHandler = async (event) => {
                 metaMessageId: "",
                 status: "failed",
                 repliedAt: null,
-                errorCode: data.error?.message || "Unknown",
+                errorCode: errMsg,
                 sentAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
               },
             })
           );
+          // Notify on critical errors (payment, parameter, rate limit)
+          if (errMsg.includes("payment") || errMsg.includes("param") || errMsg.includes("rate") || errMsg.includes("spam") || errMsg.includes("blocked")) {
+            await createNotification({
+              type: "send_failed",
+              businessId: campaignId.split("_")[0] || "",
+              businessName: batch.displayName || "",
+              phoneNumberId,
+              phoneDisplayName: batch.displayName || phoneNumberId,
+              templateName: tplName,
+              errorMessage: errMsg,
+              campaignId,
+            });
+          }
         }
       } catch (err) {
         console.error(`Failed to send to ${contact.phone}:`, err);

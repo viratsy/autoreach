@@ -35,6 +35,7 @@ function TemplatesContent() {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<"ALL" | "UTILITY" | "MARKETING">("ALL");
 
   // Copy state
   const [copyTemplate, setCopyTemplate] = useState<TemplateInfo | null>(null);
@@ -109,7 +110,9 @@ function TemplatesContent() {
     );
   };
 
-  const filtered = templates.filter((t) => t.templateName.toLowerCase().includes(search.toLowerCase()));
+  const filtered = templates
+    .filter((t) => t.templateName.toLowerCase().includes(search.toLowerCase()))
+    .filter((t) => categoryFilter === "ALL" || t.category === categoryFilter);
 
   const getNumberName = (phoneNumberId: string) =>
     selectedBiz?.phoneNumbers.find((p) => p.phoneNumberId === phoneNumberId)?.displayName || phoneNumberId;
@@ -150,14 +153,23 @@ function TemplatesContent() {
               </div>
             )}
 
-            {/* Search */}
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search templates..."
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
-            />
+            {/* Search + Filter */}
+            <div className="flex items-center gap-3 mb-4">
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search templates..."
+                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              />
+              <div className="flex bg-white border border-gray-200 rounded-lg p-0.5">
+                {(["ALL", "UTILITY", "MARKETING"] as const).map((cat) => (
+                  <button key={cat} onClick={() => setCategoryFilter(cat)} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${categoryFilter === cat ? (cat === "UTILITY" ? "bg-green-600 text-white" : cat === "MARKETING" ? "bg-orange-500 text-white" : "bg-gray-900 text-white") : "text-gray-500 hover:text-gray-700"}`}>
+                    {cat === "ALL" ? "All" : cat === "UTILITY" ? "Utility" : "Marketing"}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* Template list */}
             {loading ? (

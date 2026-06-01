@@ -584,6 +584,7 @@ Resources:
       Environment:
         Variables:
           RETRY_FUNCTION_NAME: !Ref RetryFailedFunction
+          NOTIFICATIONS_TABLE: !Sub "autoreach-notifications-${EnvName}"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref CampaignsTable
@@ -591,6 +592,8 @@ Resources:
             TableName: !Ref MessagesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref TemplatesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-notifications-${EnvName}"
         - LambdaInvokePolicy:
             FunctionName: !Ref RetryFailedFunction
       Events:
@@ -836,6 +839,28 @@ Resources:
           Properties:
             Path: /webhooks/meta
             Method: POST
+
+  NotificationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/notifications/index.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-notifications-${EnvName}"
+      Environment:
+        Variables:
+          NOTIFICATIONS_TABLE: !Sub "autoreach-notifications-${EnvName}"
+      Events:
+        GetApi:
+          Type: Api
+          Properties:
+            Path: /notifications
+            Method: GET
+        DeleteApi:
+          Type: Api
+          Properties:
+            Path: /notifications
+            Method: DELETE
 
 Outputs:
   ApiUrl:
