@@ -258,44 +258,50 @@ export default function WorkshopConfigPage() {
                                         value={numConfig.templateName || tplSearch}
                                         onChange={(e) => {
                                           setTplSearches({ ...tplSearches, [searchKey]: e.target.value });
-                                          // Clear selection if typing
                                           if (numConfig.templateName) updateRunKeyTemplate(runKey, numId, "templateName", "");
                                         }}
                                         onFocus={() => setTplSearches({ ...tplSearches, [`${searchKey}_open`]: "1" })}
                                         onBlur={() => setTimeout(() => setTplSearches({ ...tplSearches, [`${searchKey}_open`]: "" }), 200)}
                                         placeholder="Search & select template..."
-                                        className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                        className={`w-full border rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:border-transparent ${numConfig.templateName ? "border-primary-300 bg-primary-50 font-medium" : "border-gray-200"}`}
                                       />
                                       {tplSearches[`${searchKey}_open`] && !numConfig.templateName && (
-                                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
                                           {(templates[numId] || [])
                                             .filter((t) => t.templateName.includes((tplSearches[searchKey] || "").toLowerCase()))
-                                            .map((tpl) => (
-                                              <button
-                                                key={tpl.templateName}
-                                                onMouseDown={(e) => {
-                                                  e.preventDefault();
-                                                  updateRunKeyTemplate(runKey, numId, "templateName", tpl.templateName);
-                                                  updateRunKeyTemplate(runKey, numId, "bodyParams", Array(tpl.parameterCount).fill(""));
-                                                  setTplSearches({ ...tplSearches, [searchKey]: "", [`${searchKey}_open`]: "" });
-                                                }}
-                                                className="w-full text-left px-3 py-2 text-sm hover:bg-primary-50 hover:text-primary-700 transition-colors"
-                                              >
-                                                {tpl.templateName} <span className="text-gray-400">({tpl.parameterCount}p)</span>
-                                              </button>
-                                            ))}
+                                            .map((tpl) => {
+                                              return (
+                                                <button
+                                                  key={tpl.templateName}
+                                                  onMouseDown={(e) => {
+                                                    e.preventDefault();
+                                                    updateRunKeyTemplate(runKey, numId, "templateName", tpl.templateName);
+                                                    updateRunKeyTemplate(runKey, numId, "bodyParams", Array(tpl.parameterCount).fill(""));
+                                                    setTplSearches({ ...tplSearches, [searchKey]: "", [`${searchKey}_open`]: "" });
+                                                  }}
+                                                  className="w-full text-left px-3 py-2.5 hover:bg-primary-50 transition-colors border-b border-gray-50 last:border-0"
+                                                >
+                                                  <span className="text-sm text-gray-900">{tpl.templateName}</span>
+                                                  <span className="text-xs text-gray-400 ml-2">({tpl.parameterCount}p)</span>
+                                                </button>
+                                              );
+                                            })}
                                           {(templates[numId] || []).filter((t) => t.templateName.includes((tplSearches[searchKey] || "").toLowerCase())).length === 0 && (
-                                            <p className="px-3 py-2 text-xs text-gray-400">No templates found</p>
+                                            <p className="px-3 py-3 text-xs text-gray-400 text-center">No templates found</p>
                                           )}
                                         </div>
                                       )}
                                     </div>
 
-                                    {/* Template preview */}
+                                    {/* Template body preview */}
                                     {numConfig.templateName && (() => {
                                       const tpl = (templates[numId] || []).find((t) => t.templateName === numConfig.templateName);
                                       const bodyText = tpl?.components?.find((c) => (c.type as string).toUpperCase() === "BODY")?.text;
-                                      return bodyText ? <div className="mb-2 p-3 bg-gradient-to-r from-gray-50 to-slate-50 rounded-lg text-xs text-gray-600 whitespace-pre-wrap border border-gray-100">{bodyText}</div> : null;
+                                      return bodyText ? (
+                                        <div className="mb-3 p-3 bg-gradient-to-r from-slate-50 to-gray-50 rounded-lg text-xs text-gray-600 whitespace-pre-wrap border border-gray-100 leading-relaxed">
+                                          {bodyText}
+                                        </div>
+                                      ) : null;
                                     })()}
 
                                     {/* Params */}
