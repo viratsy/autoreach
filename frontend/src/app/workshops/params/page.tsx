@@ -31,6 +31,7 @@ const COMPUTED_PARAMS = [
   { key: "mentor_name", description: "Static mentor name", example: "Hardik Raja (Your Mentor)" },
   { key: "w_type", description: "Always 'Workshop'", example: "Workshop" },
   { key: "w_name", description: "Short workshop name (without '3 Hour Live')", example: "Generative AI Tools" },
+  { key: "w_date", description: "Workshop date formatted as '5th June'", example: "5th June" },
   { key: "three_hours_text", description: "3 hours live {workshop_name}", example: "3 hours live Generative AI Tools" },
   { key: "duration", description: "{workshop_time} to {workshop_time + 3 hours} IST", example: "7:00 PM to 10:00 PM IST" },
 ];

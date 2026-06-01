@@ -42,7 +42,7 @@ interface TemplateItem {
 
 const WORKSHOP_CODES = ["aitools", "msai", "aidash", "aibuild"];
 const DB_PARAMS = ["name", "zoom_link", "whatsapp_group", "workshop_name", "workshop_date", "workshop_time"];
-const COMPUTED_PARAMS = ["full_workshop_name", "workshop_name_w", "workshop_date_time", "workshop_time_short", "mentor_name", "w_type", "w_name", "three_hours_text", "duration"];
+const COMPUTED_PARAMS = ["full_workshop_name", "workshop_name_w", "workshop_date_time", "workshop_time_short", "mentor_name", "w_type", "w_name", "w_date", "three_hours_text", "duration"];
 const DEFAULT_RUN_KEYS = [
   "2days_to_go", "1day_to_go", "9am_groupjoin", "1pm_group_join", "3pm_group_join",
   "60_mins_to_go", "20_mins_to_go", "we_are_live",
@@ -56,7 +56,7 @@ const SAMPLE_VALUES: Record<string, string> = {
   full_workshop_name: "Generative AI Tools", workshop_name_w: "AI Tools Workshop",
   workshop_date_time: "5th June, 7:00 PM IST", workshop_time_short: "7 PM",
   mentor_name: "Hardik Raja (Your Mentor)", w_type: "Workshop", w_name: "AI Tools",
-  three_hours_text: "3 hours live Generative AI Tools", duration: "7:00 PM to 10:00 PM IST",
+  three_hours_text: "3 hours live Generative AI Tools", duration: "7:00 PM to 10:00 PM IST", w_date: "5th June",
 };
 
 export default function WorkshopConfigPage() {

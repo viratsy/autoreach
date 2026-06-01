@@ -179,16 +179,33 @@ async function processActiveContacts(today: string) {
             if (!numConfig?.templateName) continue;
 
             contactBatches.push({
-              contacts: numContacts.map((c) => ({
-                phone: c.phone,
-                name: c.name,
-                email: c.email,
-                workshop_name: workshopName,
-                workshop_date: batchDetails.Date || "",
-                workshop_time: batchDetails.Date?.includes("07:00") ? "07:00 PM IST" : "11:00 AM IST",
-                zoom_link: batchDetails.ZoomLink || "",
-                whatsapp_group: batchDetails.WhatsappLink || "",
-              })),
+              contacts: numContacts.map((c) => {
+                const wsDate = batchDetails.Date || "";
+                const wsTime = wsDate.includes("07:00") ? "07:00 PM IST" : "11:00 AM IST";
+                const wsTimeShort = wsDate.includes("07:00") ? "7 PM" : "11 AM";
+                const endTime = wsDate.includes("07:00") ? "10:00 PM" : "2:00 PM";
+                return {
+                  phone: c.phone,
+                  name: c.name,
+                  email: c.email,
+                  workshop_name: workshopName,
+                  workshop_date: wsDate,
+                  workshop_time: wsTime,
+                  zoom_link: batchDetails.ZoomLink || "",
+                  whatsapp_group: batchDetails.WhatsappLink || "",
+                  // Computed params
+                  full_workshop_name: `3 Hours Live ${workshopName} Workshop`,
+                  workshop_name_w: `${workshopName} Workshop`,
+                  workshop_date_time: `${wsDate} at ${wsTime}`,
+                  workshop_time_short: wsTimeShort,
+                  mentor_name: "Hardik Raja (Your Mentor)",
+                  w_type: "Workshop",
+                  w_name: workshopName,
+                  w_date: formatDateHuman(wsDate),
+                  three_hours_text: `3 hours live ${workshopName}`,
+                  duration: `${wsTimeShort} to ${endTime} IST`,
+                };
+              }),
               phoneNumberId: numId,
               templateName: numConfig.templateName,
               bodyParams: numConfig.bodyParams || [],
@@ -298,4 +315,18 @@ async function checkMasterclass(phone: string, email: string): Promise<boolean> 
   }
 
   return false;
+}
+
+function formatDateHuman(dateStr: string): string {
+  // Convert "2026-06-05" or similar to "5th June"
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const day = d.getDate();
+    const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const suffix = day === 1 || day === 21 || day === 31 ? "st" : day === 2 || day === 22 ? "nd" : day === 3 || day === 23 ? "rd" : "th";
+    return `${day}${suffix} ${months[d.getMonth()]}`;
+  } catch {
+    return dateStr;
+  }
 }
