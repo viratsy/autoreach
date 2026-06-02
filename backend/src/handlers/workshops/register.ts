@@ -1,32 +1,48 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import { PutCommand } from "@aws-sdk/lib-dynamodb";
+import { PutCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
 
 const REENGAGEMENT_TABLE = process.env.REENGAGEMENT_TABLE!;
+const REGISTRY_TABLE = process.env.WORKSHOP_REGISTRY_TABLE || "autoreach-workshop-registry-hardik";
 
-// Workshop short codes
-const WS_SHORT: Record<string, string> = {
-  "generative ai tools": "aitools",
-  "3 hour live generative ai tools workshop": "aitools",
-  "ms office with ai": "msai",
-  "3 hour live ms office with ai workshop": "msai",
-  "ai builder": "aibuild",
-  "3 hour live ai builder workshop": "aibuild",
-  "ai builders": "aibuild",
-  "ai dashboard": "aidash",
-  "3 hour live ai dashboard workshop": "aidash",
-};
+// Cache registry in memory (Lambda warm start)
+let registryCache: { code: string; aliases: string[] }[] | null = null;
+let registryCacheTime = 0;
 
-function getWsCode(name: string): string {
+async function loadRegistry() {
+  const now = Date.now();
+  if (registryCache && now - registryCacheTime < 5 * 60 * 1000) return registryCache;
+  try {
+    const result = await docClient.send(new ScanCommand({ TableName: REGISTRY_TABLE }));
+    registryCache = (result.Items || []).map((item) => ({ code: item.code, aliases: item.aliases || [] }));
+    registryCacheTime = now;
+  } catch {
+    if (!registryCache) registryCache = [];
+  }
+  return registryCache;
+}
+
+async function getWsCode(name: string): Promise<string> {
+  const registry = await loadRegistry();
   const key = (name || "").trim().toLowerCase();
-  if (WS_SHORT[key]) return WS_SHORT[key];
-  // Try partial match
-  if (key.includes("generative ai") || key.includes("ai tools")) return "aitools";
-  if (key.includes("ms office")) return "msai";
-  if (key.includes("ai builder")) return "aibuild";
-  if (key.includes("ai dashboard")) return "aidash";
-  // Fallback: first 8 chars alphanumeric
+  
+  // Exact match on code
+  const exactCode = registry.find((r) => r.code === key);
+  if (exactCode) return exactCode.code;
+  
+  // Match on aliases
+  for (const ws of registry) {
+    for (const alias of ws.aliases) {
+      if (alias.toLowerCase() === key) return ws.code;
+    }
+    // Partial match
+    for (const alias of ws.aliases) {
+      if (key.includes(alias.toLowerCase()) || alias.toLowerCase().includes(key)) return ws.code;
+    }
+  }
+  
+  // Fallback: first 8 chars
   return key.replace(/[^a-z0-9]/g, "").slice(0, 8) || "ws";
 }
 
@@ -52,7 +68,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     }
 
     const digits = normalizePhone(phone);
-    const wsCode = getWsCode(workshop_name);
+    const wsCode = await getWsCode(workshop_name);
     const now = new Date().toISOString();
 
     const item = {

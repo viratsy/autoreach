@@ -697,9 +697,14 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: dist/handlers/workshops/register.handler
+      Environment:
+        Variables:
+          WORKSHOP_REGISTRY_TABLE: !Sub "autoreach-workshop-registry-${EnvName}"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Sub "autoreach-reengagement-${EnvName}"
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-workshop-registry-${EnvName}"
       Events:
         Api:
           Type: Api
@@ -749,6 +754,33 @@ Resources:
           Properties:
             Path: /workshops/stats
             Method: GET
+
+  WorkshopRegistryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/workshops/registry.handler
+      Environment:
+        Variables:
+          WORKSHOP_REGISTRY_TABLE: !Sub "autoreach-workshop-registry-${EnvName}"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-workshop-registry-${EnvName}"
+      Events:
+        GetApi:
+          Type: Api
+          Properties:
+            Path: /workshops/registry
+            Method: GET
+        PutApi:
+          Type: Api
+          Properties:
+            Path: /workshops/registry
+            Method: PUT
+        DeleteApi:
+          Type: Api
+          Properties:
+            Path: /workshops/registry
+            Method: DELETE
 
   WorkshopConfigFunction:
     Type: AWS::Serverless::Function

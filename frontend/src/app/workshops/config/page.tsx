@@ -40,8 +40,6 @@ interface TemplateItem {
   category?: string;
 }
 
-const WORKSHOP_CODES = ["aitools", "msai", "aidash", "aibuild"];
-const ALL_WS_CODES = ["__DEFAULT__", ...["aitools", "msai", "aidash", "aibuild"]];
 const DB_PARAMS = ["name", "zoom_link", "whatsapp_group", "workshop_name", "workshop_date", "workshop_time"];
 const COMPUTED_PARAMS = ["full_workshop_name", "workshop_name_w", "workshop_date_time", "workshop_time_short", "mentor_name", "w_type", "w_name", "w_date", "three_hours_text", "duration"];
 const DEFAULT_RUN_KEYS = [
@@ -77,6 +75,7 @@ export default function WorkshopConfigPage() {
   const [testResults, setTestResults] = useState<Record<string, string>>({});
   const [showRunKeyPicker, setShowRunKeyPicker] = useState(false);
   const [defaultConfig, setDefaultConfig] = useState<WorkshopConfig | null>(null);
+  const [registryWorkshops, setRegistryWorkshops] = useState<{ code: string; displayName: string; runKeys?: string[] }[]>([]);
 
   useEffect(() => { apiRequest<{ businesses: Business[] }>("/businesses").then((d) => setBusinesses(d.businesses)); }, []);
   useEffect(() => { loadConfig(); }, [wsCode, cycle]);
@@ -85,6 +84,10 @@ export default function WorkshopConfigPage() {
     // Load default config
     apiRequest<{ config: WorkshopConfig | null }>(`/workshops/config?wsCode=__DEFAULT__&cycle=0`)
       .then((data) => { if (data.config) setDefaultConfig(data.config); })
+      .catch(() => {});
+    // Load registry
+    apiRequest<{ workshops: { code: string; displayName: string; runKeys?: string[] }[] }>("/workshops/registry")
+      .then((data) => setRegistryWorkshops(data.workshops))
       .catch(() => {});
   }, []);
 
@@ -205,7 +208,7 @@ export default function WorkshopConfigPage() {
     finally { setTestingKey(""); }
   };
 
-  const activeRunKeys = config?.activeRunKeys || DEFAULT_RUN_KEYS;
+  const activeRunKeys = config?.activeRunKeys || registryWorkshops.find((w) => w.code === wsCode)?.runKeys || DEFAULT_RUN_KEYS;
 
   const copyParamsFromFirst = (runKey: string, targetNumId: string) => {
     if (!config) return;
@@ -264,7 +267,8 @@ export default function WorkshopConfigPage() {
             {/* Workshop + Cycle selector */}
             <div className="flex items-center gap-4 mb-6">
               <select value={wsCode} onChange={(e) => setWsCode(e.target.value)} className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm">
-                {ALL_WS_CODES.map((c) => <option key={c} value={c}>{c === "__DEFAULT__" ? "⚙️ DEFAULT" : c.toUpperCase()}</option>)}
+                <option value="__DEFAULT__">⚙️ DEFAULT</option>
+                {registryWorkshops.map((ws) => <option key={ws.code} value={ws.code}>{ws.displayName || ws.code.toUpperCase()}</option>)}
               </select>
               <div className="flex bg-white border border-gray-200 rounded-xl p-1 shadow-sm">
                 {[0, 1, 2, 3, 4].map((c) => (
