@@ -181,12 +181,12 @@ async function processActiveContacts(today: string) {
         const { SQSClient, SendMessageBatchCommand } = await import("@aws-sdk/client-sqs");
         const sqs = new SQSClient({});
 
-        for (const [runKey, runKeyConfig] of Object.entries(wsConfig.runKeys as Record<string, { numbers: Record<string, { templateName: string; bodyParams: string[] }> }>)) {
+        for (const [runKey, runKeyConfig] of Object.entries(wsConfig.runKeys as Record<string, { numbers: Record<string, { templateName: string; bodyParams: string[]; headerImageUrl?: string }> }>)) {
           const numbers = Object.keys(runKeyConfig.numbers || {});
           if (numbers.length === 0) continue;
 
           // Build contacts with resolved params
-          const contactBatches: { contacts: { phone: string; name: string; [key: string]: string }[]; phoneNumberId: string; templateName: string; bodyParams: string[] }[] = [];
+          const contactBatches: { contacts: { phone: string; name: string; [key: string]: string }[]; phoneNumberId: string; templateName: string; bodyParams: string[]; headerImageUrl: string }[] = [];
 
           // Distribute contacts round-robin across numbers
           const perNumber: Record<string, typeof counterContacts> = {};
@@ -233,6 +233,7 @@ async function processActiveContacts(today: string) {
               bodyParams: (numConfig.bodyParams && numConfig.bodyParams.length > 0)
                 ? numConfig.bodyParams
                 : getDefaultParams(defaultWsConfig, runKey),
+              headerImageUrl: numConfig.headerImageUrl || "",
             });
           }
 
@@ -249,8 +250,8 @@ async function processActiveContacts(today: string) {
                     templateName: batch.templateName,
                     templateMappings: {},
                     parameterMapping: Object.fromEntries(batch.bodyParams.map((p, pi) => [String(pi + 1), p.startsWith("__CUSTOM__") ? `__STATIC__${wsConfig.customParams?.[p.replace("__CUSTOM__", "")] || ""}` : p])),
-                    headerImageUrl: "",
-                    numbersWithImageHeader: [],
+                    headerImageUrl: batch.headerImageUrl,
+                    numbersWithImageHeader: batch.headerImageUrl ? [batch.phoneNumberId] : [],
                     accessToken,
                     batch: {
                       contacts: batch.contacts,

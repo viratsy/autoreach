@@ -36,18 +36,23 @@ const COMPUTED_PARAMS = [
   { key: "duration", description: "{workshop_time} to {workshop_time + 3 hours} IST", example: "7:00 PM to 10:00 PM IST" },
 ];
 
-const WORKSHOP_CODES = ["aitools", "msai", "aidash", "aibuild"];
 
 export default function WorkshopParamsPage() {
-  const [wsCode, setWsCode] = useState("aitools");
+  const [wsCode, setWsCode] = useState("__DEFAULT__");
   const [customParams, setCustomParams] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
+  const [registryWorkshops, setRegistryWorkshops] = useState<{ code: string; displayName: string }[]>([]);
 
   useEffect(() => { loadParams(); }, [wsCode]);
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 3000); return () => clearTimeout(t); } }, [toast]);
+  useEffect(() => {
+    apiRequest<{ workshops: { code: string; displayName: string }[] }>("/workshops/registry")
+      .then((data) => setRegistryWorkshops(data.workshops))
+      .catch(() => {});
+  }, []);
 
   const loadParams = async () => {
     try {
@@ -90,7 +95,8 @@ export default function WorkshopParamsPage() {
               </div>
               <div className="flex items-center gap-3">
                 <select value={wsCode} onChange={(e) => setWsCode(e.target.value)} className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm">
-                  {WORKSHOP_CODES.map((c) => <option key={c} value={c}>{c.toUpperCase()}</option>)}
+                  <option value="__DEFAULT__">⚙️ Default</option>
+                  {registryWorkshops.map((ws) => <option key={ws.code} value={ws.code}>{ws.displayName || ws.code}</option>)}
                 </select>
                 <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white rounded-xl text-sm font-medium disabled:opacity-50 hover:bg-primary-700 shadow-sm">
                   <Save className="w-4 h-4" />

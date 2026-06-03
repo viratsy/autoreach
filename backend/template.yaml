@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: AutoReach - WhatsApp Campaign Scheduler Backend v8
+Description: AutoReach - WhatsApp Campaign Scheduler Backend v9
 
 Globals:
   Function:
@@ -18,6 +18,7 @@ Globals:
         CSV_BUCKET: !Ref CSVBucket
         META_ACCESS_TOKEN: !Ref MetaAccessToken
         WEBHOOK_VERIFY_TOKEN: !Ref WebhookVerifyToken
+        BUILD_VERSION: "v9"
         SES_FROM_EMAIL: !Ref SesFromEmail
         OTP_TABLE: !Ref OTPTable
         REENGAGEMENT_TABLE: "autoreach-reengagement-hardik"

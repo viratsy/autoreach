@@ -5,6 +5,7 @@ import Sidebar from "@/components/layout/Sidebar";
 import AuthGuard from "@/components/layout/AuthGuard";
 import { apiRequest } from "@/lib/api";
 import { Save, Plus, Trash2, Search, ChevronDown, ChevronRight, Send } from "lucide-react";
+import ImagePicker from "@/components/campaign/ImagePicker";
 
 interface Business {
   businessId: string;
@@ -16,6 +17,7 @@ interface NumberConfig {
   templateName: string;
   bodyParams: string[];
   imageType: string | null;
+  headerImageUrl?: string;
 }
 
 interface RunKeyConfig {
@@ -61,7 +63,7 @@ const SAMPLE_VALUES: Record<string, string> = {
 export default function WorkshopConfigPage() {
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [config, setConfig] = useState<WorkshopConfig | null>(null);
-  const [wsCode, setWsCode] = useState("aitools");
+  const [wsCode, setWsCode] = useState("__DEFAULT__");
   const [cycle, setCycle] = useState(0);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
@@ -198,6 +200,8 @@ export default function WorkshopConfigPage() {
           templateName: numConfig.templateName,
           templateMappings: {},
           parameterValues,
+          headerImageUrl: numConfig.headerImageUrl || "",
+          numbersWithImageHeader: numConfig.headerImageUrl ? [numId] : [],
           testPhone: testPhone.startsWith("91") ? testPhone : `91${testPhone}`,
         }),
       });
@@ -266,10 +270,30 @@ export default function WorkshopConfigPage() {
 
             {/* Workshop + Cycle selector */}
             <div className="flex items-center gap-4 mb-6">
-              <select value={wsCode} onChange={(e) => setWsCode(e.target.value)} className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm">
-                <option value="__DEFAULT__">⚙️ DEFAULT</option>
-                {registryWorkshops.map((ws) => <option key={ws.code} value={ws.code}>{ws.displayName || ws.code.toUpperCase()}</option>)}
-              </select>
+              <div className="relative">
+                <button
+                  onClick={() => setTplSearches((prev) => ({ ...prev, __ws_picker__: prev.__ws_picker__ ? "" : "1" }))}
+                  className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm hover:border-gray-300 min-w-[160px]"
+                >
+                  <span className="flex-1 text-left">{wsCode === "__DEFAULT__" ? "⚙️ Default" : registryWorkshops.find((w) => w.code === wsCode)?.displayName || wsCode}</span>
+                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                </button>
+                {tplSearches.__ws_picker__ && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+                    <button
+                      onClick={() => { setWsCode("__DEFAULT__"); setTplSearches((prev) => ({ ...prev, __ws_picker__: "" })); }}
+                      className={`w-full text-left px-4 py-2.5 text-sm hover:bg-primary-50 transition-colors ${wsCode === "__DEFAULT__" ? "bg-primary-50 text-primary-700 font-medium" : "text-gray-700"}`}
+                    >⚙️ Default</button>
+                    {registryWorkshops.map((ws) => (
+                      <button
+                        key={ws.code}
+                        onClick={() => { setWsCode(ws.code); setTplSearches((prev) => ({ ...prev, __ws_picker__: "" })); }}
+                        className={`w-full text-left px-4 py-2.5 text-sm hover:bg-primary-50 transition-colors border-t border-gray-50 ${wsCode === ws.code ? "bg-primary-50 text-primary-700 font-medium" : "text-gray-700"}`}
+                      >{ws.displayName || ws.code}</button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="flex bg-white border border-gray-200 rounded-xl p-1 shadow-sm">
                 {[0, 1, 2, 3, 4].map((c) => (
                   <button key={c} onClick={() => setCycle(c)} className={`px-4 py-2 text-xs font-medium rounded-lg transition-all ${cycle === c ? "bg-primary-600 text-white shadow" : "text-gray-500 hover:text-gray-900"}`}>
@@ -350,7 +374,41 @@ export default function WorkshopConfigPage() {
                 {selectedNumbers.length > 0 && (
                   <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
                     <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Template Mapping</h3>
+                      <div className="flex items-center gap-3">
+                        <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Template Mapping</h3>
+                        {defaultConfig && wsCode !== "__DEFAULT__" && (
+                          <button
+                            onClick={() => {
+                              if (!config || !defaultConfig?.runKeys) return;
+                              const newRunKeys = { ...config.runKeys };
+                              for (const [rk, rkConfig] of Object.entries(defaultConfig.runKeys as Record<string, RunKeyConfig>)) {
+                                if (!newRunKeys[rk]) newRunKeys[rk] = { numbers: {} };
+                                const defaultNumEntries = Object.entries(rkConfig.numbers || {});
+                                // Get default params from any number that has them
+                                const defaultParams = defaultNumEntries.find(([, n]) => n.bodyParams?.length > 0)?.[1]?.bodyParams || [];
+                                for (const numId of selectedNumbers) {
+                                  if (!newRunKeys[rk].numbers[numId]) newRunKeys[rk].numbers[numId] = { templateName: "", bodyParams: [], imageType: null };
+                                  const current = newRunKeys[rk].numbers[numId];
+                                  // Copy template if same number exists in default and current has no template
+                                  if (!current.templateName && rkConfig.numbers[numId]?.templateName) {
+                                    current.templateName = rkConfig.numbers[numId].templateName;
+                                  }
+                                  // Copy params if current is empty
+                                  if (!current.bodyParams?.length && defaultParams.length) {
+                                    current.bodyParams = [...defaultParams];
+                                  }
+                                  newRunKeys[rk].numbers[numId] = { ...current };
+                                }
+                              }
+                              setConfig({ ...config, runKeys: newRunKeys });
+                              setToast("✓ Default templates & params applied");
+                            }}
+                            className="px-3 py-1.5 text-xs font-medium bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 border border-blue-200 transition-all"
+                          >
+                            Copy All from Default
+                          </button>
+                        )}
+                      </div>
                       <div className="relative">
                         <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input type="text" value={runKeyFilter} onChange={(e) => setRunKeyFilter(e.target.value)} placeholder="Filter run keys..." className="pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm w-48" />
@@ -474,6 +532,22 @@ export default function WorkshopConfigPage() {
                                         </div>
                                       )}
                                     </div>
+
+                                    {/* Image Header picker - show when template has IMAGE header */}
+                                    {numConfig.templateName && (() => {
+                                      const tpl = (templates[numId] || []).find((t) => t.templateName === numConfig.templateName);
+                                      const hasImageHeader = tpl?.components?.some((c) => (c.type as string).toUpperCase() === "HEADER");
+                                      if (!hasImageHeader) return null;
+                                      return (
+                                        <div className="mb-3">
+                                          <p className="text-[10px] font-medium text-gray-500 mb-1 uppercase tracking-wide">Header Image</p>
+                                          <ImagePicker
+                                            value={numConfig.headerImageUrl || ""}
+                                            onChange={(url) => updateRunKeyTemplate(runKey, numId, "headerImageUrl", url)}
+                                          />
+                                        </div>
+                                      );
+                                    })()}
 
                                     {/* Template body preview with sample data */}
                                     {numConfig.templateName && (() => {
