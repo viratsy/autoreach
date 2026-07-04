@@ -1,6 +1,8 @@
 import { Handler } from "aws-lambda";
 import { ScanCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, TABLES } from "../../lib/dynamo";
+import { getProvider } from "../../lib/providers";
+import { PhoneNumber } from "../../lib/types";
 
 /**
  * Daily template sync - runs via EventBridge scheduled rule.
@@ -19,9 +21,45 @@ export const handler: Handler = async () => {
     console.log(`Found ${businesses.length} businesses`);
 
     for (const business of businesses) {
-      const accessToken = business.accessToken;
-      const phoneNumbers = business.phoneNumbers || [];
+      const provider = (business.provider as string) || "meta";
+      const phoneNumbers = (business.phoneNumbers || []) as PhoneNumber[];
 
+      // AiSensy has no template-list API — templates are added manually, nothing to sync.
+      if (provider === "aisensy") continue;
+
+      if (provider === "wati") {
+        const wati = getProvider("wati")!;
+        for (const pn of phoneNumbers) {
+          try {
+            const templates = await wati.fetchTemplates!(pn);
+            for (const tpl of templates) {
+              await docClient.send(
+                new PutCommand({
+                  TableName: TABLES.TEMPLATES,
+                  Item: {
+                    PK: `BIZ#${business.businessId}`,
+                    SK: `TPL#${pn.phoneNumberId}#${tpl.name}`,
+                    templateName: tpl.name,
+                    language: tpl.language,
+                    category: tpl.category,
+                    components: tpl.components,
+                    parameterCount: countParameters(tpl.components),
+                    status: tpl.status,
+                    source: "wati",
+                    lastSyncedAt: new Date().toISOString(),
+                  },
+                })
+              );
+            }
+            console.log(`Synced ${templates.length} WATI templates for ${pn.displayName} (${pn.phoneNumberId})`);
+          } catch (err) {
+            console.error(`Failed to sync WATI templates for ${pn.phoneNumberId}:`, err);
+          }
+        }
+        continue;
+      }
+
+      const accessToken = business.accessToken;
       if (!accessToken) continue;
 
       for (const pn of phoneNumbers) {

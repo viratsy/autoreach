@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Sidebar from "@/components/layout/Sidebar";
 import AuthGuard from "@/components/layout/AuthGuard";
 import StepIndicator from "@/components/campaign/StepIndicator";
@@ -12,6 +13,7 @@ import MapParameters from "@/components/campaign/MapParameters";
 import TestMessage from "@/components/campaign/TestMessage";
 import ReviewSchedule from "@/components/campaign/ReviewSchedule";
 import { Business, PhoneNumber, Template } from "@/types";
+import { apiRequest } from "@/lib/api";
 
 const STEPS = [
   "Select Business",
@@ -62,8 +64,56 @@ const initialDraft: CampaignDraft = {
 };
 
 export default function NewCampaignPage() {
+  return (
+    <Suspense fallback={<div className="p-6">Loading...</div>}>
+      <NewCampaignContent />
+    </Suspense>
+  );
+}
+
+function NewCampaignContent() {
+  const searchParams = useSearchParams();
+  const editId = searchParams.get("edit");
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<CampaignDraft>(initialDraft);
+  const [editCampaignId, setEditCampaignId] = useState<string | null>(editId);
+
+  useEffect(() => {
+    if (editId) loadDraftCampaign(editId);
+  }, [editId]);
+
+  async function loadDraftCampaign(campaignId: string) {
+    try {
+      const data = await apiRequest<{ campaign: any }>(`/campaigns/${campaignId}`);
+      const c = data.campaign;
+
+      // Load business details
+      let business: any = null;
+      if (c.businessId) {
+        const bizData = await apiRequest<{ businesses: any[] }>("/businesses");
+        business = bizData.businesses.find((b: any) => b.businessId === c.businessId) || null;
+      }
+
+      setDraft((prev) => ({
+        ...prev,
+        business,
+        campaignPrefix: c.campaignName || "",
+        csvS3Key: c.csvS3Key || "",
+        csvRowCount: c.totalContacts || 0,
+        headerImageUrl: c.headerImageUrl || "",
+        numbersWithImageHeader: c.numbersWithImageHeader || [],
+        templateMappings: c.templateMappings || {},
+        parameterMapping: c.parameterMapping || {},
+        scheduleDate: c.scheduleDate || "",
+        scheduleTime: c.scheduleTime || "",
+        selectedNumbers: c.selectedNumbers || [],
+      }));
+      // Jump to Review & Schedule (step 6) — user can go back if needed
+      setStep(6);
+    } catch (err) {
+      console.error("Failed to load campaign for edit:", err);
+    }
+  }
 
   const updateDraft = (updates: Partial<CampaignDraft>) => {
     setDraft((prev) => ({ ...prev, ...updates }));

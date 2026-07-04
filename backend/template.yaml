@@ -4,7 +4,7 @@ Description: AutoReach - WhatsApp Campaign Scheduler Backend v9
 
 Globals:
   Function:
-    Runtime: nodejs20.x
+    Runtime: nodejs22.x
     Timeout: 30
     MemorySize: 256
     Layers:
@@ -18,10 +18,13 @@ Globals:
         CSV_BUCKET: !Ref CSVBucket
         META_ACCESS_TOKEN: !Ref MetaAccessToken
         WEBHOOK_VERIFY_TOKEN: !Ref WebhookVerifyToken
-        BUILD_VERSION: "v9"
+        BUILD_VERSION: "v10"
         SES_FROM_EMAIL: !Ref SesFromEmail
         OTP_TABLE: !Ref OTPTable
-        REENGAGEMENT_TABLE: "autoreach-reengagement-hardik"
+        REENGAGEMENT_TABLE: !Sub "autoreach-reengagement-${EnvName}"
+        FLOWS_TABLE: !Ref FlowsTable
+        FLOW_INSTANCES_TABLE: !Ref FlowInstancesTable
+        CONVERSATIONS_TABLE: !Ref ConversationsTable
         JWT_SECRET: !Ref WebhookVerifyToken
   Api:
     Cors:
@@ -45,6 +48,10 @@ Parameters:
     Type: String
     Default: "otp@hardikraja.com"
     Description: "SES verified sender email for OTP"
+  MetaAppId:
+    Type: String
+    Default: ""
+    Description: "Meta App ID for resumable uploads"
 
 Resources:
   # --- Lambda Layer ---
@@ -54,10 +61,10 @@ Resources:
       LayerName: !Sub "autoreach-deps-${EnvName}"
       ContentUri: layers/dependencies/
       CompatibleRuntimes:
-        - nodejs20.x
+        - nodejs22.x
       RetentionPolicy: Delete
     Metadata:
-      BuildMethod: nodejs20.x
+      BuildMethod: nodejs22.x
 
   # --- DynamoDB Tables ---
   BusinessesTable:
@@ -131,6 +138,10 @@ Resources:
           AttributeType: S
         - AttributeName: GSI1SK
           AttributeType: S
+        - AttributeName: GSI3PK
+          AttributeType: S
+        - AttributeName: GSI3SK
+          AttributeType: S
       KeySchema:
         - AttributeName: PK
           KeyType: HASH
@@ -142,6 +153,14 @@ Resources:
             - AttributeName: GSI1PK
               KeyType: HASH
             - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI3
+          KeySchema:
+            - AttributeName: GSI3PK
+              KeyType: HASH
+            - AttributeName: GSI3SK
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
@@ -181,21 +200,111 @@ Resources:
         AttributeName: expiresAt
         Enabled: true
 
+  FlowsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "autoreach-flows-${EnvName}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
+  FlowInstancesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "autoreach-flow-instances-${EnvName}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  ConversationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "autoreach-conversations-${EnvName}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
   # --- SQS ---
   SendQueue:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub "autoreach-send-${EnvName}"
-      VisibilityTimeout: 300
+      VisibilityTimeout: 360
       MessageRetentionPeriod: 86400
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt SendDLQ.Arn
-        maxReceiveCount: 3
+        maxReceiveCount: 2
 
   SendDLQ:
     Type: AWS::SQS::Queue
     Properties:
       QueueName: !Sub "autoreach-send-dlq-${EnvName}"
+      MessageRetentionPeriod: 604800
+
+  WebhookQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "autoreach-webhook-${EnvName}"
+      VisibilityTimeout: 60
+      MessageRetentionPeriod: 86400
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt WebhookDLQ.Arn
+        maxReceiveCount: 3
+
+  WebhookDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "autoreach-webhook-dlq-${EnvName}"
       MessageRetentionPeriod: 604800
 
   # --- S3 ---
@@ -335,6 +444,34 @@ Resources:
           Properties:
             Path: /businesses
             Method: GET
+
+  CreateBusinessFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/businesses/create.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /businesses
+            Method: POST
+
+  UpdateBusinessFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/businesses/update.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /businesses/{businessId}
+            Method: PUT
 
   SubscribeWebhooksFunction:
     Type: AWS::Serverless::Function
@@ -565,6 +702,7 @@ Resources:
       Environment:
         Variables:
           SEND_QUEUE_URL: !Ref SendQueue
+          STAGGER_MINUTES: "1"
       Policies:
         - S3ReadPolicy:
             BucketName: !Ref CSVBucket
@@ -581,11 +719,14 @@ Resources:
       Handler: dist/handlers/campaigns/send-worker.handler
       Timeout: 300
       MemorySize: 256
-      ReservedConcurrentExecutions: 5
+      ReservedConcurrentExecutions: 50
       Environment:
         Variables:
           RETRY_FUNCTION_NAME: !Ref RetryFailedFunction
+          RESUME_FUNCTION_NAME: !Ref ResumeCampaignFunction
           NOTIFICATIONS_TABLE: !Sub "autoreach-notifications-${EnvName}"
+          UNSUBSCRIBE_TABLE: !Sub "autoreach-unsubscribe-${EnvName}"
+          MSGS_PER_SECOND: "1.5"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref CampaignsTable
@@ -595,14 +736,20 @@ Resources:
             TableName: !Ref TemplatesTable
         - DynamoDBCrudPolicy:
             TableName: !Sub "autoreach-notifications-${EnvName}"
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-unsubscribe-${EnvName}"
         - LambdaInvokePolicy:
             FunctionName: !Ref RetryFailedFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ResumeCampaignFunction
       Events:
         SQSEvent:
           Type: SQS
           Properties:
             Queue: !GetAtt SendQueue.Arn
             BatchSize: 1
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
 
   RetryFailedFunction:
     Type: AWS::Serverless::Function
@@ -627,6 +774,86 @@ Resources:
           Properties:
             Path: /campaigns/{campaignId}/retry
             Method: POST
+
+  AutoStopCampaignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/auto-stop.handler
+      Timeout: 60
+      Environment:
+        Variables:
+          NOTIFICATIONS_TABLE: !Sub "autoreach-notifications-${EnvName}"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-notifications-${EnvName}"
+      Events:
+        NightlySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(30 19 * * ? *)
+            Description: "Auto-stop campaigns still running from a previous day, 1 AM IST"
+
+  ResumeCampaignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/resume.handler
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          SEND_QUEUE_URL: !Ref SendQueue
+          RETRY_FUNCTION_NAME: !Ref RetryFailedFunction
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt SendQueue.QueueName
+        - LambdaInvokePolicy:
+            FunctionName: !Ref RetryFailedFunction
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/{campaignId}/resume
+            Method: POST
+
+  RescheduleCampaignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/reschedule.handler
+      Timeout: 30
+      Environment:
+        Variables:
+          SCHEDULER_GROUP: !Sub "autoreach-${EnvName}"
+          SEND_FUNCTION_ARN: !GetAtt SendCampaignFunction.Arn
+          SCHEDULER_ROLE_ARN: !GetAtt SchedulerRole.Arn
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - scheduler:DeleteSchedule
+                - scheduler:CreateSchedule
+              Resource:
+                - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/autoreach-${EnvName}/*"
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource: !GetAtt SchedulerRole.Arn
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/{campaignId}/reschedule
+            Method: PUT
 
   FetchTemplatesFunction:
     Type: AWS::Serverless::Function
@@ -659,11 +886,45 @@ Resources:
             Path: /templates
             Method: GET
 
+  ManualAddTemplateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/templates/manual-add.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TemplatesTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /templates/manual
+            Method: POST
+
+  CreateTemplateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/templates/create.handler
+      Timeout: 60
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TemplatesTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /templates/create
+            Method: POST
+
   CopyTemplateFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: dist/handlers/templates/copy.handler
       Timeout: 60
+      Environment:
+        Variables:
+          META_APP_ID: !Ref MetaAppId
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref BusinessesTable
@@ -858,9 +1119,12 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: dist/handlers/webhooks/meta-status.handler
+      Environment:
+        Variables:
+          WEBHOOK_QUEUE_URL: !Ref WebhookQueue
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref MessagesTable
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt WebhookQueue.QueueName
       Events:
         WebhookGet:
           Type: Api
@@ -872,6 +1136,39 @@ Resources:
           Properties:
             Path: /webhooks/meta
             Method: POST
+
+  WebhookWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/webhooks/webhook-worker.handler
+      Timeout: 60
+      MemorySize: 256
+      ReservedConcurrentExecutions: 10
+      Environment:
+        Variables:
+          FLOWS_TABLE: !Ref FlowsTable
+          FLOW_INSTANCES_TABLE: !Ref FlowInstancesTable
+          CONVERSATIONS_TABLE: !Ref ConversationsTable
+          UNSUBSCRIBE_TABLE: !Sub "autoreach-unsubscribe-${EnvName}"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FlowsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FlowInstancesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConversationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-unsubscribe-${EnvName}"
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt WebhookQueue.Arn
+            BatchSize: 10
 
   NotificationsFunction:
     Type: AWS::Serverless::Function
@@ -894,6 +1191,124 @@ Resources:
           Properties:
             Path: /notifications
             Method: DELETE
+
+  # --- Automation Flows ---
+  FlowsCrudFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/flows/crud.handler
+      Environment:
+        Variables:
+          FLOWS_TABLE: !Ref FlowsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FlowsTable
+      Events:
+        ListApi:
+          Type: Api
+          Properties:
+            Path: /flows
+            Method: GET
+        CreateApi:
+          Type: Api
+          Properties:
+            Path: /flows
+            Method: POST
+        GetApi:
+          Type: Api
+          Properties:
+            Path: /flows/{flowId}
+            Method: GET
+        UpdateApi:
+          Type: Api
+          Properties:
+            Path: /flows/{flowId}
+            Method: PUT
+        DeleteApi:
+          Type: Api
+          Properties:
+            Path: /flows/{flowId}
+            Method: DELETE
+        ToggleApi:
+          Type: Api
+          Properties:
+            Path: /flows/{flowId}/toggle
+            Method: POST
+
+  FlowConversationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/flows/conversations.handler
+      Environment:
+        Variables:
+          CONVERSATIONS_TABLE: !Ref ConversationsTable
+          FLOW_INSTANCES_TABLE: !Ref FlowInstancesTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConversationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FlowInstancesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+      Events:
+        GetChat:
+          Type: Api
+          Properties:
+            Path: /conversations
+            Method: GET
+        ListChats:
+          Type: Api
+          Properties:
+            Path: /conversations/list
+            Method: GET
+        SendChat:
+          Type: Api
+          Properties:
+            Path: /conversations/send
+            Method: POST
+        FlowInstances:
+          Type: Api
+          Properties:
+            Path: /flows/{flowId}/instances
+            Method: GET
+
+  FlowSchedulerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/flows/scheduler.handler
+      Timeout: 120
+      Environment:
+        Variables:
+          FLOWS_TABLE: !Ref FlowsTable
+          FLOW_INSTANCES_TABLE: !Ref FlowInstancesTable
+          CONVERSATIONS_TABLE: !Ref ConversationsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FlowsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FlowInstancesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConversationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+      Events:
+        ScheduleEvent:
+          Type: Schedule
+          Properties:
+            Schedule: rate(15 minutes)
+            Description: "Check for expired flow waits and retrigger"
+
+  FlowTestApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/flows/test-api.handler
+      Timeout: 30
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /flows/test-api
+            Method: POST
 
 Outputs:
   ApiUrl:

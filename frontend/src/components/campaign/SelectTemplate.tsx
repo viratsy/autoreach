@@ -31,7 +31,12 @@ export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Prop
   const [mismatchNumbers, setMismatchNumbers] = useState<string[]>([]);
   const [marketingNumbers, setMarketingNumbers] = useState<string[]>([]);
   const [skippedNumbers, setSkippedNumbers] = useState<string[]>([]);
+  const [showManualAdd, setShowManualAdd] = useState(false);
+  const [manualName, setManualName] = useState("");
+  const [manualParamCount, setManualParamCount] = useState("0");
+  const [addingManual, setAddingManual] = useState(false);
 
+  const provider = draft.business?.provider || "meta";
   const selectedNumberIds = draft.selectedNumbers.map((n) => n.phoneNumberId);
 
   useEffect(() => {
@@ -65,6 +70,34 @@ export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Prop
       console.error("Sync failed:", err);
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const addManualTemplate = async () => {
+    if (!manualName.trim()) return;
+    setAddingManual(true);
+    try {
+      await Promise.all(
+        draft.selectedNumbers.map((n) =>
+          apiRequest("/templates/manual", {
+            method: "POST",
+            body: JSON.stringify({
+              businessId: draft.business!.businessId,
+              phoneNumberId: n.phoneNumberId,
+              templateName: manualName.trim(),
+              parameterCount: parseInt(manualParamCount) || 0,
+            }),
+          })
+        )
+      );
+      setManualName("");
+      setManualParamCount("0");
+      setShowManualAdd(false);
+      await loadTemplates();
+    } catch (err) {
+      console.error("Manual add failed:", err);
+    } finally {
+      setAddingManual(false);
     }
   };
 
@@ -163,25 +196,67 @@ export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Prop
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-gray-900">Select Template</h3>
         <div className="flex items-center gap-3">
-          <a
-            href={`https://business.facebook.com/latest/whatsapp_manager/message_templates?business_id=${draft.business?.metaBusinessId || draft.business?.businessId}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
-          >
-            <ExternalLink className="w-3 h-3" />
-            WhatsApp Manager
-          </a>
-          <button
-            onClick={syncTemplates}
-            disabled={syncing}
-            className="flex items-center gap-1 text-sm text-primary-600 hover:text-primary-700 disabled:opacity-50"
-          >
-            <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
-            {syncing ? "Syncing..." : "Sync from Meta"}
-          </button>
+          {provider === "meta" && (
+            <a
+              href={`https://business.facebook.com/latest/whatsapp_manager/message_templates?business_id=${draft.business?.metaBusinessId || draft.business?.businessId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700"
+            >
+              <ExternalLink className="w-3 h-3" />
+              WhatsApp Manager
+            </a>
+          )}
+          {provider === "aisensy" ? (
+            <button
+              onClick={() => setShowManualAdd((v) => !v)}
+              className="flex items-center gap-1 text-sm text-primary-600 hover:text-primary-700"
+            >
+              + Add Template Manually
+            </button>
+          ) : (
+            <button
+              onClick={syncTemplates}
+              disabled={syncing}
+              className="flex items-center gap-1 text-sm text-primary-600 hover:text-primary-700 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
+              {syncing ? "Syncing..." : provider === "wati" ? "Sync from WATI" : "Sync from Meta"}
+            </button>
+          )}
         </div>
       </div>
+
+      {provider === "aisensy" && showManualAdd && (
+        <div className="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-lg flex items-end gap-3">
+          <div className="flex-1">
+            <label className="block text-xs text-gray-500 mb-1">Template name (AiSensy campaign name)</label>
+            <input
+              type="text"
+              value={manualName}
+              onChange={(e) => setManualName(e.target.value)}
+              className="w-full text-sm border border-gray-300 rounded px-3 py-1.5"
+            />
+          </div>
+          <div className="w-32">
+            <label className="block text-xs text-gray-500 mb-1"># Parameters</label>
+            <input
+              type="number"
+              min={0}
+              value={manualParamCount}
+              onChange={(e) => setManualParamCount(e.target.value)}
+              className="w-full text-sm border border-gray-300 rounded px-3 py-1.5"
+            />
+          </div>
+          <button
+            onClick={addManualTemplate}
+            disabled={addingManual || !manualName.trim()}
+            className="px-3 py-1.5 bg-primary-600 text-white rounded text-sm font-medium disabled:opacity-50"
+          >
+            {addingManual ? "Adding..." : "Add"}
+          </button>
+        </div>
+      )}
 
       {/* Search */}
       <div className="relative mb-4">
@@ -200,7 +275,13 @@ export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Prop
       ) : templates.length === 0 ? (
         <div className="text-center py-8">
           <p className="text-gray-500 text-sm">No templates found.</p>
-          <p className="text-gray-400 text-xs mt-1">Click &quot;Sync from Meta&quot; to fetch templates.</p>
+          <p className="text-gray-400 text-xs mt-1">
+            {provider === "aisensy"
+              ? 'Click "Add Template Manually" to register one.'
+              : provider === "wati"
+              ? 'Click "Sync from WATI" to fetch templates.'
+              : 'Click "Sync from Meta" to fetch templates.'}
+          </p>
         </div>
       ) : (
         <div className="space-y-2 max-h-72 overflow-y-auto">

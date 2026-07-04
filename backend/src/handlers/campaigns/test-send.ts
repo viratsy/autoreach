@@ -2,6 +2,8 @@ import { APIGatewayProxyHandler } from "aws-lambda";
 import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, TABLES } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
+import { getProvider } from "../../lib/providers";
+import { PhoneNumber } from "../../lib/types";
 
 /**
  * Send a test message from all selected numbers to a test phone number.
@@ -40,11 +42,43 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     if (!business) return error(404, "Business not found", origin);
 
     const accessToken = business.accessToken;
+    const provider = (business.provider as string) || "meta";
+    // Server-side source of truth for per-number secrets — never trust the client-supplied selectedNumbers for these.
+    const bizNumbersById = new Map(
+      ((business.phoneNumbers || []) as PhoneNumber[]).map((pn) => [pn.phoneNumberId, pn])
+    );
     const results: { phoneNumberId: string; displayName: string; status: string; error?: string; messageId?: string }[] = [];
 
     // Send test from each selected number
     for (const number of selectedNumbers) {
       const tplName = templateMappings?.[number.phoneNumberId] || templateName;
+
+      if (provider !== "meta") {
+        const bizNumber = bizNumbersById.get(number.phoneNumberId);
+        const providerImpl = getProvider(provider);
+        const paramList = Object.entries(parameterValues as Record<string, string>)
+          .sort(([a], [b]) => Number(a) - Number(b))
+          .map(([, value]) => value);
+
+        const result = providerImpl && bizNumber
+          ? await providerImpl.sendMessage({
+              phone: testPhone,
+              contactName: "Test Contact",
+              templateName: tplName,
+              parameters: paramList,
+              number: bizNumber,
+            })
+          : { ok: false, error: `Unknown provider "${provider}" or number not found` };
+
+        results.push({
+          phoneNumberId: number.phoneNumberId,
+          displayName: number.displayName,
+          status: result.ok ? "sent" : "failed",
+          error: result.ok ? undefined : result.error,
+          messageId: result.messageId,
+        });
+        continue;
+      }
 
       try {
         const requestBody = {

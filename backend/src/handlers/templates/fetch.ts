@@ -2,6 +2,8 @@ import { APIGatewayProxyHandler } from "aws-lambda";
 import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, TABLES } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
+import { getProvider } from "../../lib/providers";
+import { PhoneNumber } from "../../lib/types";
 
 /**
  * Fetch templates from Meta API for a given business.
@@ -27,8 +29,43 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     const business = bizResult.Item;
     if (!business) return error(404, "Business not found", origin);
 
+    const provider = (business.provider as string) || "meta";
+    const phoneNumbers = (business.phoneNumbers || []) as PhoneNumber[];
+
+    if (provider === "aisensy") {
+      return error(400, "AiSensy has no template-list API — add templates manually via /templates/manual", origin);
+    }
+
+    if (provider === "wati") {
+      const wati = getProvider("wati")!;
+      const allTemplates: Record<string, string[]> = {};
+      for (const pn of phoneNumbers) {
+        const templates = await wati.fetchTemplates!(pn);
+        for (const tpl of templates) {
+          await docClient.send(
+            new PutCommand({
+              TableName: TABLES.TEMPLATES,
+              Item: {
+                PK: `BIZ#${businessId}`,
+                SK: `TPL#${pn.phoneNumberId}#${tpl.name}`,
+                templateName: tpl.name,
+                language: tpl.language,
+                category: tpl.category,
+                components: tpl.components,
+                parameterCount: countParameters(tpl.components),
+                status: tpl.status,
+                source: "wati",
+                lastSyncedAt: new Date().toISOString(),
+              },
+            })
+          );
+        }
+        allTemplates[pn.phoneNumberId] = templates.map((t) => t.name);
+      }
+      return success({ templates: allTemplates }, origin);
+    }
+
     const accessToken = business.accessToken;
-    const phoneNumbers = business.phoneNumbers || [];
     const allTemplates: Record<string, string[]> = {};
 
     // Fetch templates for each number using its wabaid

@@ -25,7 +25,26 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     );
     const campaign = result.Item;
     if (!campaign) return error(404, "Campaign not found", origin);
-    if (campaign.status !== "scheduled") return error(400, "Only scheduled campaigns can be cancelled", origin);
+    
+    // Handle running campaigns — stop and mark as completed
+    if (campaign.status === "running") {
+      await docClient.send(
+        new UpdateCommand({
+          TableName: TABLES.CAMPAIGNS,
+          Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" },
+          UpdateExpression: "SET #status = :status, GSI2PK = :gsi2pk, updatedAt = :now",
+          ExpressionAttributeNames: { "#status": "status" },
+          ExpressionAttributeValues: {
+            ":status": "completed",
+            ":gsi2pk": "STATUS#completed",
+            ":now": new Date().toISOString(),
+          },
+        })
+      );
+      return success({ message: "Campaign stopped and marked as completed" }, origin);
+    }
+
+    if (campaign.status !== "scheduled") return error(400, "Only scheduled or running campaigns can be stopped", origin);
 
     // Delete EventBridge schedule
     try {

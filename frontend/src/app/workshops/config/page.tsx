@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Sidebar from "@/components/layout/Sidebar";
 import AuthGuard from "@/components/layout/AuthGuard";
 import { apiRequest } from "@/lib/api";
-import { Save, Plus, Trash2, Search, ChevronDown, ChevronRight, Send } from "lucide-react";
+import { Save, Plus, Trash2, Search, ChevronDown, ChevronRight, Send, RefreshCw } from "lucide-react";
 import ImagePicker from "@/components/campaign/ImagePicker";
 
 interface Business {
@@ -93,20 +93,26 @@ export default function WorkshopConfigPage() {
       .catch(() => {});
   }, []);
 
+  const loadTemplates = async () => {
+    if (!config?.businessId || selectedNumbers.length === 0) return;
+    const params = new URLSearchParams({ businessId: config.businessId, phoneNumberIds: selectedNumbers.join(",") });
+    try {
+      const data = await apiRequest<{ templates: (TemplateItem & { availableOn: string[] })[] }>(`/templates?${params}`);
+      const byNumber: Record<string, TemplateItem[]> = {};
+      for (const tpl of data.templates) {
+        for (const numId of tpl.availableOn) {
+          if (!byNumber[numId]) byNumber[numId] = [];
+          byNumber[numId].push({ templateName: tpl.templateName, parameterCount: tpl.parameterCount, components: tpl.components, category: tpl.category });
+        }
+      }
+      setTemplates(byNumber);
+      setToast("✓ Templates synced");
+    } catch {}
+  };
+
   useEffect(() => {
     if (config?.businessId && selectedNumbers.length > 0) {
-      const params = new URLSearchParams({ businessId: config.businessId, phoneNumberIds: selectedNumbers.join(",") });
-      apiRequest<{ templates: (TemplateItem & { availableOn: string[] })[] }>(`/templates?${params}`)
-        .then((data) => {
-          const byNumber: Record<string, TemplateItem[]> = {};
-          for (const tpl of data.templates) {
-            for (const numId of tpl.availableOn) {
-              if (!byNumber[numId]) byNumber[numId] = [];
-              byNumber[numId].push({ templateName: tpl.templateName, parameterCount: tpl.parameterCount, components: tpl.components, category: tpl.category });
-            }
-          }
-          setTemplates(byNumber);
-        }).catch(() => {});
+      loadTemplates();
     }
   }, [config?.businessId, selectedNumbers]);
 
@@ -409,9 +415,14 @@ export default function WorkshopConfigPage() {
                           </button>
                         )}
                       </div>
-                      <div className="relative">
-                        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input type="text" value={runKeyFilter} onChange={(e) => setRunKeyFilter(e.target.value)} placeholder="Filter run keys..." className="pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm w-48" />
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => loadTemplates()} className="flex items-center gap-1 px-3 py-2 text-xs font-medium text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded-lg border border-primary-200 transition-all">
+                          <RefreshCw className="w-3 h-3" /> Sync Templates
+                        </button>
+                        <div className="relative">
+                          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                          <input type="text" value={runKeyFilter} onChange={(e) => setRunKeyFilter(e.target.value)} placeholder="Filter run keys..." className="pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm w-48" />
+                        </div>
                       </div>
                     </div>
 

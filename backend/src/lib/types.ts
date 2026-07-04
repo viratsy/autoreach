@@ -1,10 +1,15 @@
 // Shared backend types
 
+export type Provider = "meta" | "aisensy" | "wati";
+
 export interface PhoneNumber {
   phoneNumberId: string;
   displayNumber: string;
   displayName: string;
-  wabaid: string;
+  wabaid?: string;
+  apiKey?: string;
+  source?: string;
+  endpoint?: string;
 }
 
 export interface CSVContact {
@@ -18,6 +23,7 @@ export interface BusinessRecord {
   SK: string;
   businessId: string;
   businessName: string;
+  provider?: Provider;
   accessToken: string;
   phoneNumbers: PhoneNumber[];
   createdAt: string;

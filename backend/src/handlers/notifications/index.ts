@@ -1,5 +1,5 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import { PutCommand, QueryCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
+import { UpdateCommand, QueryCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, TABLES } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
 
@@ -7,9 +7,9 @@ const NOTIFICATIONS_TABLE = process.env.NOTIFICATIONS_TABLE || "autoreach-notifi
 
 export interface Notification {
   PK: string; // NOTIF#<id>
-  SK: string; // TIMESTAMP#<iso>
+  SK: string; // DEDUP#<type>#<businessId>#<phoneNumberId>#<templateName>#<errorMessage> — stable per distinct issue
   id: string;
-  type: "template_marketing" | "send_failed" | "quality_issue" | "payment_issue";
+  type: "template_marketing" | "send_failed" | "quality_issue" | "payment_issue" | "campaign_stuck";
   businessId: string;
   businessName: string;
   phoneNumberId: string;
@@ -20,12 +20,14 @@ export interface Notification {
   appealLink?: string;
   businessManagerLink?: string;
   createdAt: string;
+  lastSeenAt: string;
+  occurrenceCount: number;
   resolved: boolean;
 }
 
 /**
  * GET /notifications - list active notifications
- * DELETE /notifications?id=xxx - dismiss/resolve a notification
+ * DELETE /notifications?id=xxx&sk=xxx - dismiss/resolve a notification
  */
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
@@ -38,11 +40,15 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           TableName: NOTIFICATIONS_TABLE,
           KeyConditionExpression: "PK = :pk",
           ExpressionAttributeValues: { ":pk": "ACTIVE" },
-          ScanIndexForward: false,
-          Limit: 50,
         })
       );
-      return success({ notifications: result.Items || [] }, origin);
+      // SK is a stable dedup key (not chronological), so sort by recency in-app.
+      const items = (result.Items || []).sort((a, b) => {
+        const ta = a.lastSeenAt || a.createdAt || "";
+        const tb = b.lastSeenAt || b.createdAt || "";
+        return tb.localeCompare(ta);
+      });
+      return success({ notifications: items.slice(0, 50) }, origin);
     } catch (err) {
       console.error("List notifications error:", err);
       return error(500, "Failed to list notifications", origin);
@@ -66,7 +72,12 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 };
 
 /**
- * Helper to create a notification (called from other handlers)
+ * Helper to create a notification (called from other handlers).
+ *
+ * Deduplicated by (type, businessId, phoneNumberId, templateName, errorMessage): repeated
+ * calls with the same signature update the same row (bumping occurrenceCount + lastSeenAt)
+ * instead of inserting a new one. Without this, a single campaign failing on hundreds of
+ * contacts would create hundreds of near-identical rows and crowd out everything else.
  */
 export async function createNotification(data: {
   type: Notification["type"];
@@ -83,25 +94,40 @@ export async function createNotification(data: {
   const appealLink = `https://business.facebook.com/wa/manage/message-templates/?waba_id=&business_id=${data.businessId}`;
   const businessManagerLink = `https://business.facebook.com/settings/whatsapp-business-accounts/?business_id=${data.businessId}`;
 
+  const dedupKey = [
+    data.type,
+    data.businessId,
+    data.phoneNumberId || "-",
+    data.templateName || "-",
+    (data.errorMessage || "").slice(0, 150),
+  ].join("#");
+
   await docClient.send(
-    new PutCommand({
+    new UpdateCommand({
       TableName: NOTIFICATIONS_TABLE,
-      Item: {
-        PK: "ACTIVE",
-        SK: `TS#${now}#${id}`,
-        id,
-        type: data.type,
-        businessId: data.businessId,
-        businessName: data.businessName,
-        phoneNumberId: data.phoneNumberId,
-        phoneDisplayName: data.phoneDisplayName,
-        templateName: data.templateName || "",
-        errorMessage: data.errorMessage || "",
-        campaignId: data.campaignId || "",
-        appealLink,
-        businessManagerLink,
-        createdAt: now,
-        resolved: false,
+      Key: { PK: "ACTIVE", SK: `DEDUP#${dedupKey}` },
+      UpdateExpression:
+        "SET id = if_not_exists(id, :id), #type = :type, businessId = :bid, businessName = :bname, " +
+        "phoneNumberId = :pnid, phoneDisplayName = :pdname, templateName = :tpl, errorMessage = :err, " +
+        "campaignId = :camp, appealLink = :appeal, businessManagerLink = :bmlink, " +
+        "createdAt = if_not_exists(createdAt, :now), lastSeenAt = :now, resolved = :false " +
+        "ADD occurrenceCount :one",
+      ExpressionAttributeNames: { "#type": "type" },
+      ExpressionAttributeValues: {
+        ":id": id,
+        ":type": data.type,
+        ":bid": data.businessId,
+        ":bname": data.businessName,
+        ":pnid": data.phoneNumberId,
+        ":pdname": data.phoneDisplayName,
+        ":tpl": data.templateName || "",
+        ":err": data.errorMessage || "",
+        ":camp": data.campaignId || "",
+        ":appeal": appealLink,
+        ":bmlink": businessManagerLink,
+        ":now": now,
+        ":false": false,
+        ":one": 1,
       },
     })
   );

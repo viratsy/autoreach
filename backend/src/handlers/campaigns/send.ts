@@ -46,14 +46,22 @@ export const handler: Handler = async (event) => {
     );
     const business = bizResult.Item;
     const accessToken = business?.accessToken || "";
+    const provider = (business?.provider as string) || "meta";
+    // Server-side source of truth for per-number secrets (apiKey/endpoint) — never trust the
+    // client-supplied campaign.selectedNumbers for these, since they came from a frontend request.
+    const bizNumbersById = new Map(
+      ((business?.phoneNumbers || []) as { phoneNumberId: string; wabaid?: string; apiKey?: string; source?: string; endpoint?: string }[])
+        .map((pn) => [pn.phoneNumberId, pn])
+    );
 
-    // SAFETY: Check template category on ALL numbers before sending
+    // SAFETY: Check template category on ALL numbers before sending.
+    // Only meaningful for Meta — AiSensy/WATI have no equivalent category concept.
     const healthyNumbers: typeof campaign.selectedNumbers = [];
     const marketingNumbers: string[] = [];
 
     for (const number of campaign.selectedNumbers) {
-      const wabaid = (number as unknown as { wabaid?: string })?.wabaid;
-      if (wabaid && accessToken) {
+      const wabaid = bizNumbersById.get(number.phoneNumberId)?.wabaid;
+      if (provider === "meta" && wabaid && accessToken) {
         try {
           const tplRes = await fetch(
             `https://graph.facebook.com/v25.0/${wabaid}/message_templates?name=${campaign.templateName}&limit=1`,
@@ -95,7 +103,17 @@ export const handler: Handler = async (event) => {
 
     // Distribute round-robin across healthy numbers only
     const numberCount = activeNumbers.length;
-    const batches: { contacts: CSVContact[]; phoneNumberId: string; displayName: string; wabaid?: string }[] = [];
+    const STAGGER_MINUTES = parseInt(process.env.STAGGER_MINUTES || "1");
+    const batches: {
+      contacts: CSVContact[];
+      phoneNumberId: string;
+      displayName: string;
+      wabaid?: string;
+      apiKey?: string;
+      source?: string;
+      endpoint?: string;
+      delaySeconds: number;
+    }[] = [];
 
     // Group contacts by assigned number
     const perNumber: Record<string, CSVContact[]> = {};
@@ -106,21 +124,36 @@ export const handler: Handler = async (event) => {
     });
 
     // Split each number's contacts into batches of BATCH_SIZE
-    for (const [phoneNumberId, numberContacts] of Object.entries(perNumber)) {
+    // Each number gets a staggered SQS delay so they don't all start simultaneously.
+    // Number 0 starts at 0s, Number 1 at STAGGER_MINUTES*60s, etc.
+    const numberOrder = Object.keys(perNumber);
+    for (const [numberIndex, phoneNumberId] of numberOrder.entries()) {
+      const numberContacts = perNumber[phoneNumberId];
       const number = activeNumbers.find((n) => n.phoneNumberId === phoneNumberId);
+      const staggerDelaySecs = numberIndex * STAGGER_MINUTES * 60;
+      const numberExtras: { wabaid?: string; apiKey?: string; source?: string; endpoint?: string } =
+        bizNumbersById.get(phoneNumberId) || {};
       for (let i = 0; i < numberContacts.length; i += BATCH_SIZE) {
         batches.push({
           contacts: numberContacts.slice(i, i + BATCH_SIZE),
           phoneNumberId,
           displayName: number?.displayName || "",
-          wabaid: (number as unknown as { wabaid?: string })?.wabaid,
+          wabaid: numberExtras?.wabaid,
+          apiKey: numberExtras?.apiKey,
+          source: numberExtras?.source,
+          endpoint: numberExtras?.endpoint,
+          delaySeconds: staggerDelaySecs,
         });
       }
     }
 
-    console.log(`Created ${batches.length} batches for ${numberCount} numbers`);
+    console.log(`Created ${batches.length} batches across ${numberCount} numbers (stagger: ${STAGGER_MINUTES}min between numbers)`);
 
     // Push batches to SQS (max 10 per SendMessageBatch)
+    // Each number's batches get a DelaySeconds so numbers start staggered,
+    // not all simultaneously. Number 0 starts immediately, number 1 starts
+    // after STAGGER_MINUTES, number 2 after 2×STAGGER_MINUTES, etc.
+    // SQS max delay is 900 seconds (15 min) — enough for 15+ numbers at 1min stagger.
     for (let i = 0; i < batches.length; i += 10) {
       const chunk = batches.slice(i, i + 10);
       await sqs.send(
@@ -128,8 +161,10 @@ export const handler: Handler = async (event) => {
           QueueUrl: QUEUE_URL,
           Entries: chunk.map((batch, idx) => ({
             Id: `${i + idx}`,
+            DelaySeconds: Math.min(batch.delaySeconds || 0, 900),
             MessageBody: JSON.stringify({
               campaignId,
+              provider,
               templateName: campaign.templateName,
               templateMappings: campaign.templateMappings,
               parameterMapping: campaign.parameterMapping,

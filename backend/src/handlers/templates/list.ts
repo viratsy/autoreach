@@ -40,6 +40,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       categoryPerNumber: Record<string, string>;
       paramCountPerNumber: Record<string, number>;
       hasImageHeaderPerNumber: Record<string, boolean>;
+      statusPerNumber: Record<string, string>;
     }> = {};
 
     for (const item of items) {
@@ -70,12 +71,14 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           categoryPerNumber: {},
           paramCountPerNumber: {},
           hasImageHeaderPerNumber: {},
+          statusPerNumber: {},
         };
       }
       templateMap[templateName].availableOn.push(phoneNumberId);
       templateMap[templateName].categoryPerNumber[phoneNumberId] = item.category;
       templateMap[templateName].paramCountPerNumber[phoneNumberId] = item.parameterCount;
       templateMap[templateName].hasImageHeaderPerNumber[phoneNumberId] = hasImageHeader;
+      templateMap[templateName].statusPerNumber[phoneNumberId] = item.status || "approved";
 
       // If any number has MARKETING, mark overall as MARKETING
       if (item.category === "MARKETING") {

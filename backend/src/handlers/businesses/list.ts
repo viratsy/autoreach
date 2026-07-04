@@ -16,11 +16,17 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       businessId: item.businessId,
       businessName: item.businessName,
       metaBusinessId: item.metaBusinessId || "",
+      provider: item.provider || "meta",
+      hasAccessToken: Boolean(item.accessToken),
+      // apiKey/endpoint are secrets (equivalent to Meta's accessToken) — never exposed to the frontend.
+      // hasApiKey/hasEndpoint let the edit UI show "configured" without revealing the value.
       phoneNumbers: (item.phoneNumbers || []).map((pn: Record<string, string>) => ({
         phoneNumberId: pn.phoneNumberId,
         displayNumber: pn.displayNumber,
         displayName: pn.displayName,
         wabaid: pn.wabaid,
+        hasApiKey: Boolean(pn.apiKey),
+        endpoint: pn.endpoint,
       })),
       createdAt: item.createdAt,
     }));

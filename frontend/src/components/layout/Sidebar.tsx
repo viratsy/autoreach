@@ -9,6 +9,9 @@ import {
   LogOut,
   FileText,
   CalendarClock,
+  Workflow,
+  MessageSquare,
+  Zap,
 } from "lucide-react";
 import { logout, getCurrentEmail } from "@/lib/api";
 
@@ -16,6 +19,9 @@ const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/campaigns/", label: "Campaigns", icon: Send },
   { href: "/campaigns/new/", label: "New Campaign", icon: PlusCircle },
+  { href: "/quick-send/", label: "Quick Send", icon: Zap },
+  { href: "/flows/", label: "Flows", icon: Workflow },
+  { href: "/conversations/", label: "Conversations", icon: MessageSquare },
   { href: "/workshops/", label: "Workshops", icon: CalendarClock },
   { href: "/workshops/registry/", label: "WS Registry", icon: CalendarClock },
   { href: "/workshops/config/", label: "WS Config", icon: CalendarClock },

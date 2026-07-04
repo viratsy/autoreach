@@ -1,15 +1,24 @@
 // Business types
+export type Provider = "meta" | "aisensy" | "wati";
+
 export interface PhoneNumber {
   phoneNumberId: string;
   displayNumber: string;
   displayName: string;
-  wabaid: string;
+  wabaid?: string;
+  apiKey?: string;
+  source?: string;
+  endpoint?: string;
+  hasApiKey?: boolean; // read-only, from GET /businesses — apiKey itself is never sent to the browser
 }
 
 export interface Business {
   businessId: string;
   businessName: string;
   metaBusinessId?: string;
+  provider?: Provider;
+  accessToken?: string;
+  hasAccessToken?: boolean; // read-only, from GET /businesses
   phoneNumbers: PhoneNumber[];
   createdAt: string;
   updatedAt: string;
@@ -85,6 +94,8 @@ export interface Template {
   parameterCount: number;
   status: "approved" | "pending" | "rejected";
   lastSyncedAt: string;
+  source?: Provider;
+  manuallyAdded?: boolean;
 }
 
 export interface TemplateComponent {

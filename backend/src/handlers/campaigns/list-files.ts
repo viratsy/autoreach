@@ -15,14 +15,13 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
   try {
     const limit = parseInt(event.queryStringParameters?.limit || "10");
-    const startAfter = event.queryStringParameters?.startAfter || undefined;
 
+    // Fetch all CSV files (S3 lists alphabetically, we need latest by date)
     const result = await s3.send(
       new ListObjectsV2Command({
         Bucket: BUCKET,
         Prefix: "uploads/",
-        MaxKeys: limit + 1,
-        StartAfter: startAfter,
+        MaxKeys: 200, // Fetch more to sort by date
       })
     );
 
@@ -30,19 +29,19 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       (obj) => obj.Key && obj.Key.endsWith(".csv")
     );
 
-    const hasMore = allItems.length > limit;
+    // Sort by LastModified descending (latest first)
+    allItems.sort((a, b) => (b.LastModified?.getTime() || 0) - (a.LastModified?.getTime() || 0));
+
     const items = allItems.slice(0, limit);
 
-    const files = items
-      .sort((a, b) => (b.LastModified?.getTime() || 0) - (a.LastModified?.getTime() || 0))
-      .map((obj) => ({
-        s3Key: obj.Key,
-        fileName: obj.Key!.split("/").pop() || obj.Key,
-        size: obj.Size,
-        uploadedAt: obj.LastModified?.toISOString(),
-      }));
+    const files = items.map((obj) => ({
+      s3Key: obj.Key,
+      fileName: obj.Key!.split("/").pop() || obj.Key,
+      size: obj.Size,
+      uploadedAt: obj.LastModified?.toISOString(),
+    }));
 
-    return success({ files, hasMore, lastKey: hasMore ? items[items.length - 1]?.Key : null }, origin);
+    return success({ files, hasMore: allItems.length > limit, lastKey: null }, origin);
   } catch (err) {
     console.error("List files error:", err);
     return error(500, "Failed to list files", origin);

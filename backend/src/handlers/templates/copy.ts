@@ -16,7 +16,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   if (event.httpMethod === "OPTIONS") return options(origin);
 
   try {
-    const { businessId, sourcePhoneNumberId, templateName, targetWabaIds } = JSON.parse(event.body || "{}");
+    const { businessId, sourcePhoneNumberId, templateName, targetWabaIds, headerImageUrl } = JSON.parse(event.body || "{}");
 
     if (!businessId || !sourcePhoneNumberId || !templateName || !targetWabaIds?.length) {
       return error(400, "businessId, sourcePhoneNumberId, templateName, and targetWabaIds are required", origin);
@@ -72,7 +72,25 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       }
 
       try {
-        // Submit components as-is (including examples for approval)
+        // Deep clone components so we can modify per-target
+        const components = JSON.parse(JSON.stringify(templateStructure.components)) as any[];
+
+        // Handle image/video/document headers — upload to Meta to get a file handle
+        for (const comp of components) {
+          if (comp.type === "HEADER" && ["IMAGE", "VIDEO", "DOCUMENT"].includes(comp.format)) {
+            if (headerImageUrl) {
+              const handle = await uploadImageToMeta(headerImageUrl, accessToken);
+              if (handle) {
+                comp.example = { header_handle: [handle] };
+              } else {
+                delete comp.example;
+              }
+            } else {
+              delete comp.example;
+            }
+          }
+        }
+
         const createRes = await fetch(
           `https://graph.facebook.com/v25.0/${targetWabaid}/message_templates`,
           {
@@ -85,7 +103,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
               name: templateStructure.name,
               category: templateStructure.category,
               language: templateStructure.language,
-              components: templateStructure.components,
+              components,
             }),
           }
         );
@@ -116,3 +134,63 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     return error(500, "Failed to copy template", origin);
   }
 };
+
+/**
+ * Upload image to Meta via Resumable Upload API and return the file handle.
+ * Steps: 1) Download image 2) Create upload session 3) Upload bytes 4) Get handle
+ */
+async function uploadImageToMeta(imageUrl: string, accessToken: string): Promise<string | null> {
+  try {
+    // 1. Download the image
+    const imgRes = await fetch(imageUrl);
+    if (!imgRes.ok) {
+      console.error(`Failed to download image: ${imgRes.status}`);
+      return null;
+    }
+    const imageBuffer = Buffer.from(await imgRes.arrayBuffer());
+    const contentType = imgRes.headers.get("content-type") || "image/jpeg";
+    const fileSize = imageBuffer.length;
+
+    // 2. Create upload session using the app ID
+    // Meta's upload API: POST /{app-id}/uploads?file_length=X&file_type=Y
+    const appId = process.env.META_APP_ID || "";
+    if (!appId) {
+      console.error("META_APP_ID not set");
+      return null;
+    }
+
+    const sessionRes = await fetch(
+      `https://graph.facebook.com/v25.0/${appId}/uploads?file_length=${fileSize}&file_type=${encodeURIComponent(contentType)}`,
+      { method: "POST", headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    const sessionData = (await sessionRes.json()) as { id?: string; error?: { message: string } };
+    if (!sessionData.id) {
+      console.error("Upload session failed:", sessionData.error?.message);
+      return null;
+    }
+
+    // 3. Upload the file bytes
+    const uploadRes = await fetch(
+      `https://graph.facebook.com/v25.0/${sessionData.id}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `OAuth ${accessToken}`,
+          "Content-Type": contentType,
+          file_offset: "0",
+        },
+        body: imageBuffer,
+      }
+    );
+    const uploadData = (await uploadRes.json()) as { h?: string; error?: { message: string } };
+    if (!uploadData.h) {
+      console.error("Upload failed:", uploadData.error?.message);
+      return null;
+    }
+
+    return uploadData.h;
+  } catch (err) {
+    console.error("uploadImageToMeta error:", err);
+    return null;
+  }
+}

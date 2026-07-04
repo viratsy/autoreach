@@ -21,7 +21,10 @@ const statusFilters: CampaignStatus[] = ["draft", "scheduled", "running", "compl
 export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [filter, setFilter] = useState<CampaignStatus | "all">("all");
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<Record<string, { sent: number; delivered: number; read: number; failed: number; replies: number } | null>>({});
+  const [checkingAll, setCheckingAll] = useState(false);
 
   useEffect(() => {
     loadCampaigns();
@@ -32,15 +35,43 @@ export default function CampaignsPage() {
       const data = await apiRequest<{ campaigns: Campaign[] }>("/campaigns");
       setCampaigns(data.campaigns);
     } catch {
-      // API not connected yet — show empty state
     } finally {
       setLoading(false);
     }
   };
 
-  const filtered = filter === "all"
+  const checkStats = async (campaignId: string) => {
+    try {
+      const data = await apiRequest<{ campaign: any; metrics?: any }>(`/campaigns/${campaignId}`);
+      const m = data.metrics || data.campaign?.metrics || {};
+      setStats((prev) => ({ ...prev, [campaignId]: { sent: m.sent || 0, delivered: m.delivered || 0, read: m.read || 0, failed: m.failed || 0, replies: m.replies || 0 } }));
+    } catch {
+      setStats((prev) => ({ ...prev, [campaignId]: null }));
+    }
+  };
+
+  const checkAllStats = async () => {
+    setCheckingAll(true);
+    for (const c of filtered) {
+      if (c.status !== "draft" && c.status !== "cancelled") {
+        await checkStats(c.campaignId);
+        await new Promise((r) => setTimeout(r, 200)); // Small delay to not overwhelm
+      }
+    }
+    setCheckingAll(false);
+  };
+
+  const filtered = (filter === "all"
     ? campaigns
-    : campaigns.filter((c) => c.status === filter);
+    : campaigns.filter((c) => c.status === filter)
+  )
+    .filter((c) => !search || c.campaignName.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      // Sort by schedule date descending (newest first)
+      const dateA = `${a.scheduleDate} ${a.scheduleTime}`;
+      const dateB = `${b.scheduleDate} ${b.scheduleTime}`;
+      return dateB.localeCompare(dateA);
+    });
 
   return (
     <AuthGuard>
@@ -58,8 +89,16 @@ export default function CampaignsPage() {
           </a>
         </div>
 
-        {/* Filters */}
-        <div className="flex gap-2 mb-4 flex-wrap">
+        {/* Search + Filters */}
+        <div className="flex items-center gap-3 mb-4">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search campaigns..."
+            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-64"
+          />
+          <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setFilter("all")}
             className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
@@ -79,6 +118,7 @@ export default function CampaignsPage() {
               {s}
             </button>
           ))}
+          </div>
         </div>
 
         {/* Table */}
@@ -102,7 +142,16 @@ export default function CampaignsPage() {
                     <th className="text-left px-6 py-3 font-medium">Schedule</th>
                     <th className="text-left px-6 py-3 font-medium">Status</th>
                     <th className="text-left px-6 py-3 font-medium">Contacts</th>
-                    <th className="text-left px-6 py-3 font-medium">Actions</th>
+                    <th className="text-left px-4 py-3 font-medium text-xs">Sent</th>
+                    <th className="text-left px-4 py-3 font-medium text-xs">Delivered</th>
+                    <th className="text-left px-4 py-3 font-medium text-xs">Read</th>
+                    <th className="text-left px-4 py-3 font-medium text-xs">Replies</th>
+                    <th className="text-left px-6 py-3 font-medium">
+                      Actions
+                      <button onClick={checkAllStats} disabled={checkingAll} className="ml-2 text-[10px] text-blue-600 hover:underline disabled:opacity-50">
+                        {checkingAll ? "Checking..." : "Check All"}
+                      </button>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -117,11 +166,39 @@ export default function CampaignsPage() {
                         </span>
                       </td>
                       <td className="px-6 py-3 text-gray-600">{campaign.totalContacts}</td>
+                      <td className="px-4 py-3 text-xs text-gray-600">{stats[campaign.campaignId]?.sent ?? "-"}</td>
+                      <td className="px-4 py-3 text-xs text-green-600">{stats[campaign.campaignId]?.delivered ?? "-"}</td>
+                      <td className="px-4 py-3 text-xs text-blue-600">{stats[campaign.campaignId]?.read ?? "-"}</td>
+                      <td className="px-4 py-3 text-xs text-purple-600">{stats[campaign.campaignId]?.replies ?? "-"}</td>
                       <td className="px-6 py-3">
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 flex-wrap">
+                          <button onClick={() => checkStats(campaign.campaignId)} className="text-blue-500 hover:text-blue-700 text-xs font-medium">Check</button>
                           <a href={`/campaigns/view/?id=${campaign.campaignId}`} className="text-primary-600 hover:text-primary-800 text-xs font-medium">
                             View
                           </a>
+                          {campaign.status === "draft" && (
+                            <a href={`/campaigns/new/?edit=${campaign.campaignId}`} className="text-blue-600 hover:text-blue-800 text-xs font-medium">
+                              Edit
+                            </a>
+                          )}
+                          {campaign.status === "scheduled" && (
+                            <button
+                              onClick={() => {
+                                const date = prompt("New date (YYYY-MM-DD):", campaign.scheduleDate);
+                                if (!date) return;
+                                const time = prompt("New time (HH:MM, IST):", campaign.scheduleTime);
+                                if (!time) return;
+                                apiRequest(`/campaigns/${campaign.campaignId}/reschedule`, {
+                                  method: "PUT",
+                                  body: JSON.stringify({ scheduleDate: date, scheduleTime: time }),
+                                }).then(() => { alert("Rescheduled!"); window.location.reload(); })
+                                  .catch(() => alert("Failed to reschedule"));
+                              }}
+                              className="text-yellow-600 hover:text-yellow-800 text-xs font-medium"
+                            >
+                              Reschedule
+                            </button>
+                          )}
                           <button
                             onClick={async () => {
                               try {
@@ -146,6 +223,21 @@ export default function CampaignsPage() {
                               className="text-red-500 hover:text-red-700 text-xs font-medium"
                             >
                               Cancel
+                            </button>
+                          )}
+                          {campaign.status === "running" && (
+                            <button
+                              onClick={async () => {
+                                if (confirm("Stop this campaign and mark as completed?")) {
+                                  try {
+                                    await apiRequest(`/campaigns/${campaign.campaignId}/cancel`, { method: "POST" });
+                                    window.location.reload();
+                                  } catch {}
+                                }
+                              }}
+                              className="text-red-500 hover:text-red-700 text-xs font-medium"
+                            >
+                              Stop
                             </button>
                           )}
                         </div>
