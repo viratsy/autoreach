@@ -1,9 +1,15 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { DashboardStats, Campaign, Business } from "@/types";
+import { DashboardStats, Campaign, Business, WindowKey } from "@/types";
 import { apiRequest } from "@/lib/api";
+import DashboardHeader from "./DashboardHeader";
 import StatsCards from "./StatsCards";
+import MessageVolumeStats from "./MessageVolumeStats";
+import BroadcastPerformanceChart from "./BroadcastPerformanceChart";
+import MessageBreakdownDonut from "./MessageBreakdownDonut";
+import TopTemplatesCard from "./TopTemplatesCard";
+import ApiStatusCard from "./ApiStatusCard";
 import RecentCampaigns from "./RecentCampaigns";
 import {
   AlertTriangle,
@@ -352,6 +358,11 @@ export default function Dashboard() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [bizLoading, setBizLoading] = useState(true);
+  // Single shared time-window selector — drives the hero stat cards, the
+  // broadcast-performance chart, the breakdown donut, and top templates, all
+  // from data already returned in one /campaigns response (no extra requests
+  // when switching pills).
+  const [selectedWindow, setSelectedWindow] = useState<WindowKey>("today");
 
   useEffect(() => {
     apiRequest<{ campaigns: Campaign[]; stats: DashboardStats }>("/campaigns")
@@ -384,10 +395,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900">Dashboard</h2>
-        <p className="text-gray-500 text-sm mt-1">Campaign overview and metrics</p>
-      </div>
+      <DashboardHeader unreadCount={notifications.length} />
 
       <NotificationsPanel notifications={notifications} onDismissGroup={dismissGroup} />
 
@@ -411,13 +419,45 @@ export default function Dashboard() {
         )}
       </div>
 
+      <MessageVolumeStats
+        stats={stats.messageVolume}
+        previousStats={stats.previousMessageVolume}
+        selected={selectedWindow}
+        onSelect={setSelectedWindow}
+      />
+
       <StatsCards stats={stats} />
+
+      <BroadcastPerformanceChart data={stats.dailyBreakdown?.[selectedWindow]} />
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <MessageBreakdownDonut totals={stats.breakdownTotals?.[selectedWindow]} />
+        <TopTemplatesCard templates={stats.topTemplates?.[selectedWindow]} />
+        <ApiStatusCard businesses={businesses} />
+      </div>
 
       {loading ? (
         <p className="text-gray-400 text-sm text-center py-8">Loading campaigns...</p>
       ) : (
         <RecentCampaigns campaigns={campaigns.slice(0, 10)} />
       )}
+
+      {/* Maps the mockup's "Automation" CTA to our real Flows feature — not a
+          decorative banner, it's a functional link. */}
+      <a
+        href="/flows/"
+        className="block bg-gradient-to-r from-primary-600 to-primary-700 rounded-xl p-6 text-white hover:from-primary-700 hover:to-primary-800 transition-colors"
+      >
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <h3 className="font-semibold text-lg">Boost your reach with Automation</h3>
+            <p className="text-primary-100 text-sm mt-1">Set up automated flows and never miss an opportunity to engage your audience.</p>
+          </div>
+          <span className="bg-white text-primary-700 px-4 py-2 rounded-lg text-sm font-medium shrink-0">
+            Go to Flows
+          </span>
+        </div>
+      </a>
     </div>
   );
 }

@@ -15,7 +15,9 @@ export function estimateCost(
   category: string
 ): { perMessage: number; total: number; currency: string } {
   const cat = category.toLowerCase() as keyof typeof PRICING_INR;
-  const perMessage = PRICING_INR[cat] || PRICING_INR.utility;
+  // `?? ` not `||` — service is legitimately priced at 0, which `||` would treat as
+  // falsy and silently replace with the utility rate.
+  const perMessage = PRICING_INR[cat] ?? PRICING_INR.utility;
   return {
     perMessage,
     total: Math.round(totalContacts * perMessage * 100) / 100,
@@ -28,7 +30,9 @@ export function calculateActualCost(
   category: string
 ): { perMessage: number; total: number; currency: string } {
   const cat = category.toLowerCase() as keyof typeof PRICING_INR;
-  const perMessage = PRICING_INR[cat] || PRICING_INR.utility;
+  // `?? ` not `||` — service is legitimately priced at 0, which `||` would treat as
+  // falsy and silently replace with the utility rate.
+  const perMessage = PRICING_INR[cat] ?? PRICING_INR.utility;
   return {
     perMessage,
     total: Math.round(deliveredCount * perMessage * 100) / 100,

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import Sidebar from "@/components/layout/Sidebar";
+import AppShell from "@/components/layout/AppShell";
 import AuthGuard from "@/components/layout/AuthGuard";
 import { Business } from "@/types";
 import { apiRequest } from "@/lib/api";
@@ -20,7 +20,12 @@ export default function BusinessesPage() {
   const [activeBusinessId, setActiveBusinessId] = useState<string | null>(null);
   const [subscribing, setSubscribing] = useState<Record<string, "idle" | "loading" | "success" | "error">>({});
   const [subscribeErrors, setSubscribeErrors] = useState<Record<string, string>>({});
-  const [qualityRatings, setQualityRatings] = useState<Record<string, { qualityRating: string; messagingLimit: string }>>({});
+  const [registering, setRegistering] = useState<Record<string, "idle" | "loading" | "success" | "error">>({});
+  const [registerErrors, setRegisterErrors] = useState<Record<string, string>>({});
+  const [pinInputs, setPinInputs] = useState<Record<string, string>>({});
+  const [qualityRatings, setQualityRatings] = useState<
+    Record<string, { qualityRating: string; messagingLimit: string; canSendMessage?: string; healthErrors?: { code?: number; description?: string; solution?: string }[] }>
+  >({});
   const [checkingQuality, setCheckingQuality] = useState<Record<string, boolean>>({});
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
@@ -72,6 +77,27 @@ export default function BusinessesPage() {
     }
   };
 
+  // Registers a number on the Cloud API — required once per number before it
+  // can send/receive messages, separate from (and usually done before)
+  // subscribing its WABA to receive status webhooks.
+  const registerNumber = async (businessId: string, phoneNumberId: string) => {
+    const pin = pinInputs[phoneNumberId] || "030524";
+    setRegistering((prev) => ({ ...prev, [phoneNumberId]: "loading" }));
+    try {
+      await apiRequest("/businesses/register-number", {
+        method: "POST",
+        body: JSON.stringify({ businessId, phoneNumberId, pin }),
+      });
+      setRegistering((prev) => ({ ...prev, [phoneNumberId]: "success" }));
+      setToast({ message: `${phoneNumberId} registered successfully`, type: "success" });
+    } catch (err) {
+      setRegistering((prev) => ({ ...prev, [phoneNumberId]: "error" }));
+      const msg = err instanceof Error ? err.message : "Registration failed";
+      setRegisterErrors((prev) => ({ ...prev, [phoneNumberId]: msg }));
+      setToast({ message: msg, type: "error" });
+    }
+  };
+
   const checkQuality = async (businessId: string, phoneNumberIds?: string[]) => {
     const ids = phoneNumberIds || [];
     ids.forEach((id) => setCheckingQuality((prev) => ({ ...prev, [id]: true })));
@@ -85,7 +111,9 @@ export default function BusinessesPage() {
     }
 
     try {
-      const data = await apiRequest<{ results: Record<string, { qualityRating: string; messagingLimit: string }> }>(
+      const data = await apiRequest<{
+        results: Record<string, { qualityRating: string; messagingLimit: string; canSendMessage?: string; healthErrors?: { code?: number; description?: string; solution?: string }[] }>;
+      }>(
         "/businesses/quality-check",
         { method: "POST", body: JSON.stringify({ businessId, phoneNumberIds: ids.length ? ids : undefined }) }
       );
@@ -106,9 +134,7 @@ export default function BusinessesPage() {
 
   return (
     <AuthGuard>
-    <div className="flex h-screen">
-      <Sidebar />
-      <main className="flex-1 overflow-y-auto p-6">
+    <AppShell>
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-gray-900">Businesses</h2>
           <Link
@@ -192,10 +218,13 @@ export default function BusinessesPage() {
                       <tr>
                         <th className="text-left px-4 py-2 font-medium">Name</th>
                         <th className="text-left px-4 py-2 font-medium">Number</th>
+                        <th className="text-left px-4 py-2 font-medium">Number ID</th>
                         {provider === "meta" ? (
                           <>
                             <th className="text-left px-4 py-2 font-medium">Quality</th>
+                            <th className="text-left px-4 py-2 font-medium">Health</th>
                             <th className="text-left px-4 py-2 font-medium">WABA ID</th>
+                            <th className="text-left px-4 py-2 font-medium">Register</th>
                             <th className="text-left px-4 py-2 font-medium">Webhook</th>
                             <th className="text-left px-4 py-2 font-medium">Links</th>
                           </>
@@ -209,6 +238,7 @@ export default function BusinessesPage() {
                         <tr key={pn.phoneNumberId} className="hover:bg-gray-50">
                           <td className="px-4 py-3 font-medium text-gray-900">{pn.displayName}</td>
                           <td className="px-4 py-3 text-gray-600">{pn.displayNumber}</td>
+                          <td className="px-4 py-3 text-gray-400 font-mono text-xs">{pn.phoneNumberId}</td>
                           {provider === "meta" ? (
                             <>
                               <td className="px-4 py-3">
@@ -238,7 +268,73 @@ export default function BusinessesPage() {
                                   </button>
                                 )}
                               </td>
+                              <td className="px-4 py-3">
+                                {checkingQuality[pn.phoneNumberId] ? (
+                                  <span className="text-xs text-gray-400">Checking...</span>
+                                ) : qualityRatings[pn.phoneNumberId] ? (
+                                  (() => {
+                                    const q = qualityRatings[pn.phoneNumberId];
+                                    const canSend = q.canSendMessage || "UNKNOWN";
+                                    const colors: Record<string, string> = {
+                                      AVAILABLE: "bg-green-100 text-green-700",
+                                      LIMITED: "bg-yellow-100 text-yellow-700",
+                                      BLOCKED: "bg-red-100 text-red-700",
+                                      UNKNOWN: "bg-gray-100 text-gray-500",
+                                    };
+                                    const firstError = q.healthErrors?.[0];
+                                    return (
+                                      <div>
+                                        <span
+                                          className={`text-xs px-2 py-0.5 rounded-full font-medium ${colors[canSend] || colors.UNKNOWN}`}
+                                          title={firstError?.description}
+                                        >
+                                          {canSend}
+                                        </span>
+                                        {firstError?.description && (
+                                          <p className="text-[10px] text-red-600 mt-0.5 max-w-[220px]">{firstError.description}</p>
+                                        )}
+                                      </div>
+                                    );
+                                  })()
+                                ) : (
+                                  <span className="text-xs text-gray-400">—</span>
+                                )}
+                              </td>
                               <td className="px-4 py-3 text-gray-400 text-xs font-mono">{pn.wabaid}</td>
+                              <td className="px-4 py-3">
+                                {registering[pn.phoneNumberId] === "loading" ? (
+                                  <span className="flex items-center gap-1 text-xs text-blue-600">
+                                    <Loader2 className="w-3 h-3 animate-spin" /> Registering...
+                                  </span>
+                                ) : registering[pn.phoneNumberId] === "success" ? (
+                                  <span className="flex items-center gap-1 text-xs text-green-600">
+                                    <CheckCircle className="w-3 h-3" /> Registered
+                                  </span>
+                                ) : (
+                                  <div className="flex items-center gap-1">
+                                    <input
+                                      type="text"
+                                      value={pinInputs[pn.phoneNumberId] ?? "030524"}
+                                      onChange={(e) =>
+                                        setPinInputs((prev) => ({ ...prev, [pn.phoneNumberId]: e.target.value }))
+                                      }
+                                      className="w-16 border border-gray-300 rounded px-1.5 py-0.5 text-xs"
+                                      placeholder="PIN"
+                                    />
+                                    <button
+                                      onClick={() => registerNumber(biz.businessId, pn.phoneNumberId)}
+                                      className="text-xs text-green-600 hover:text-green-700 font-medium"
+                                    >
+                                      Register
+                                    </button>
+                                    {registering[pn.phoneNumberId] === "error" && (
+                                      <span className="text-xs text-red-600" title={registerErrors[pn.phoneNumberId]}>
+                                        Failed
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
                               <td className="px-4 py-3">
                                 {subscribing[pn.wabaid || ""] === "loading" ? (
                                   <span className="flex items-center gap-1 text-xs text-blue-600">
@@ -309,8 +405,7 @@ export default function BusinessesPage() {
             {toast.message}
           </div>
         )}
-      </main>
-    </div>
+    </AppShell>
     </AuthGuard>
   );
 }

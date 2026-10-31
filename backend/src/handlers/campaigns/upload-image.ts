@@ -2,10 +2,13 @@ import { APIGatewayProxyHandler } from "aws-lambda";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { success, error, options } from "../../lib/response";
+import { getAuthEmail } from "../../lib/auth";
 
 const s3 = new S3Client({ requestChecksumCalculation: "WHEN_REQUIRED" });
 const BUCKET = process.env.CSV_BUCKET!;
 const CDN_URL = process.env.CDN_URL || "";
+const ALLOWED_CONTENT_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5MB
 
 /**
  * Generate a presigned URL for image upload.
@@ -15,10 +18,14 @@ const CDN_URL = process.env.CDN_URL || "";
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
   if (event.httpMethod === "OPTIONS") return options(origin);
+  if (!getAuthEmail(event)) return error(401, "Unauthorized", origin);
 
   try {
     const { fileName, contentType } = JSON.parse(event.body || "{}");
     if (!fileName) return error(400, "fileName is required", origin);
+    if (contentType && !ALLOWED_CONTENT_TYPES.includes(contentType)) {
+      return error(400, `contentType must be one of ${ALLOWED_CONTENT_TYPES.join(", ")}`, origin);
+    }
 
     const key = `images/${Date.now()}_${fileName}`;
 

@@ -9,6 +9,7 @@ import {
 import { docClient } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
 import { FlowRecord, FlowStep } from "../../lib/flow-types";
+import { getAuthEmail } from "../../lib/auth";
 
 const FLOWS_TABLE = process.env.FLOWS_TABLE!;
 
@@ -22,6 +23,7 @@ const FLOWS_TABLE = process.env.FLOWS_TABLE!;
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
   if (event.httpMethod === "OPTIONS") return options(origin);
+  if (!getAuthEmail(event)) return error(401, "Unauthorized", origin);
 
   const path = event.path;
   const method = event.httpMethod;

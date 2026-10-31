@@ -254,7 +254,17 @@ function FlowBuilderPage() {
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      {/* This is a drag/pan/zoom canvas editor — genuinely hard to make
+          touch-friendly, so it's desktop-only rather than attempting a real
+          touch rework. */}
+      <div className="md:hidden flex-1 flex items-center justify-center p-6 text-center">
+        <p className="text-sm text-gray-500">
+          The flow builder works best on a larger screen. Please switch to a
+          tablet or desktop to edit this flow.
+        </p>
+      </div>
+
+      <div className="hidden md:flex flex-1 overflow-hidden">
         {/* Canvas */}
         <div className="flex-1">
           <ReactFlow

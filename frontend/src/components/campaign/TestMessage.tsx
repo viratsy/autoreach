@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { CampaignDraft } from "@/app/campaigns/new/page";
 import { apiRequest } from "@/lib/api";
-import { Send, CheckCircle, XCircle } from "lucide-react";
+import EmailChannelPanel from "./EmailChannelPanel";
+import { Send, CheckCircle, XCircle, RefreshCw } from "lucide-react";
 
 interface Props {
   draft: CampaignDraft;
+  onUpdate: (updates: Partial<CampaignDraft>) => void;
   onNext: () => void;
   onBack: () => void;
 }
@@ -17,9 +19,17 @@ interface TestResult {
   status: string;
   error?: string;
   messageId?: string;
+  checkingDelivery?: boolean;
 }
 
-export default function TestMessage({ draft, onNext, onBack }: Props) {
+// Meta's send response only confirms the message was ACCEPTED, not delivered —
+// a payment/billing issue is often only reported a few seconds later via an async
+// webhook. Poll test-send-status.ts briefly so the wizard catches that instead of
+// showing a false "sent" for something that's actually about to fail.
+const DELIVERY_POLL_INTERVAL_MS = 2000;
+const DELIVERY_POLL_ATTEMPTS = 7; // ~14s total
+
+export default function TestMessage({ draft, onUpdate, onNext, onBack }: Props) {
   const [testPhone, setTestPhone] = useState("");
   const [paramValues, setParamValues] = useState<Record<string, string>>(() => {
     // Pre-fill with static values from parameterMapping
@@ -61,8 +71,12 @@ export default function TestMessage({ draft, onNext, onBack }: Props) {
           testPhone,
         }),
       });
-      setResults(data.results);
+      const withChecking = data.results.map((r) =>
+        r.status === "sent" && r.messageId ? { ...r, checkingDelivery: true } : r
+      );
+      setResults(withChecking);
       setSent(true);
+      pollDeliveryStatus(withChecking);
     } catch (err) {
       console.error("Test send failed:", err);
       setResults([{
@@ -74,6 +88,48 @@ export default function TestMessage({ draft, onNext, onBack }: Props) {
     } finally {
       setSending(false);
     }
+  };
+
+  const pollDeliveryStatus = async (initialResults: TestResult[]) => {
+    const messageIds = initialResults.filter((r) => r.checkingDelivery && r.messageId).map((r) => r.messageId!);
+    if (messageIds.length === 0) return;
+
+    for (let attempt = 0; attempt < DELIVERY_POLL_ATTEMPTS; attempt++) {
+      await new Promise((r) => setTimeout(r, DELIVERY_POLL_INTERVAL_MS));
+
+      let statuses: Record<string, { status: string; errorCode?: string; errorLabel?: string }> = {};
+      try {
+        const data = await apiRequest<{ statuses: Record<string, { status: string; errorCode?: string; errorLabel?: string }> }>(
+          `/campaigns/test-send/status?messageIds=${messageIds.join(",")}`
+        );
+        statuses = data.statuses;
+      } catch {
+        continue; // transient — keep polling rather than giving up on one failed check
+      }
+
+      let stillPending = false;
+      setResults((prev) =>
+        prev.map((r) => {
+          if (!r.checkingDelivery || !r.messageId) return r;
+          const s = statuses[r.messageId];
+          if (!s || s.status === "sent" || s.status === "unknown") {
+            stillPending = true;
+            return r;
+          }
+          if (s.status === "failed") {
+            return { ...r, checkingDelivery: false, status: "failed", error: s.errorLabel || s.errorCode || "Delivery failed" };
+          }
+          // delivered/read etc. — confirmed fine, stop checking
+          return { ...r, checkingDelivery: false };
+        })
+      );
+
+      if (!stillPending) return;
+    }
+
+    // Poll window elapsed with no failure reported — stop showing "checking" but
+    // leave status as "sent" (accepted); we simply never heard otherwise in time.
+    setResults((prev) => prev.map((r) => (r.checkingDelivery ? { ...r, checkingDelivery: false } : r)));
   };
 
   const allParamsFilled = params.every((p) => paramValues[p]?.trim());
@@ -142,42 +198,80 @@ export default function TestMessage({ draft, onNext, onBack }: Props) {
       </button>
 
       {/* Results */}
-      {results.length > 0 && (
+      {results.length > 0 && (() => {
+        const failedCount = results.filter((r) => r.status === "failed").length;
+        const checkingCount = results.filter((r) => r.checkingDelivery).length;
+        const okCount = results.length - failedCount - checkingCount;
+        return (
         <div className="mt-5 space-y-2">
-          <p className="text-sm font-medium text-gray-700">Results:</p>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <p className="text-sm font-medium text-gray-700">Results ({results.length} numbers):</p>
+            <div className="flex items-center gap-3 text-xs font-medium">
+              <span className="flex items-center gap-1 text-green-700"><CheckCircle className="w-3.5 h-3.5" />{okCount} done</span>
+              {checkingCount > 0 && (
+                <span className="flex items-center gap-1 text-amber-700"><RefreshCw className="w-3.5 h-3.5 animate-spin" />{checkingCount} checking</span>
+              )}
+              <span className="flex items-center gap-1 text-red-700"><XCircle className="w-3.5 h-3.5" />{failedCount} failed</span>
+            </div>
+          </div>
           {results.map((r, i) => {
             const number = draft.selectedNumbers.find((n) => n.phoneNumberId === r.phoneNumberId);
             return (
               <div
                 key={i}
                 className={`p-3 rounded-lg text-sm ${
-                  r.status === "sent" ? "bg-green-50" : "bg-red-50"
+                  r.status === "failed" ? "bg-red-50" : r.checkingDelivery ? "bg-amber-50" : "bg-green-50"
                 }`}
               >
                 <div className="flex items-center gap-2">
-                  {r.status === "sent" ? (
-                    <CheckCircle className="w-4 h-4 text-green-600" />
-                  ) : (
+                  {r.status === "failed" ? (
                     <XCircle className="w-4 h-4 text-red-600" />
+                  ) : r.checkingDelivery ? (
+                    <RefreshCw className="w-4 h-4 text-amber-600 animate-spin" />
+                  ) : (
+                    <CheckCircle className="w-4 h-4 text-green-600" />
                   )}
                   <span className="font-medium text-gray-900">{r.displayName}</span>
                   <span className="text-gray-400">•</span>
                   <span className="text-xs text-gray-500">{number?.displayNumber}</span>
                 </div>
                 <div className="ml-6 mt-1">
-                  {r.status === "sent" ? (
+                  {r.status === "failed" ? (
+                    <p className="text-xs text-red-700 font-medium">
+                      {r.checkingDelivery === false && r.messageId ? "Delivery failed: " : ""}{r.error}
+                    </p>
+                  ) : r.checkingDelivery ? (
+                    <p className="text-xs text-amber-700">
+                      Accepted by Meta • checking for delivery issues (e.g. payment/billing)...
+                    </p>
+                  ) : (
                     <p className="text-xs text-green-700">
                       Accepted by Meta • ID: {r.messageId?.slice(0, 20)}...
                     </p>
-                  ) : (
-                    <p className="text-xs text-red-700">{r.error}</p>
                   )}
                 </div>
               </div>
             );
           })}
         </div>
-      )}
+        );
+      })()}
+
+      {/* The email half of the test lives here rather than on Review, so both
+          channels are tried in the same place and before anything is scheduled.
+          Picking the template here is what makes that possible — Review only
+          summarises the choice afterwards. */}
+      <div className="mt-8 pt-6 border-t border-gray-100">
+        <EmailChannelPanel
+          msg={draft.msg}
+          enabled={draft.emailEnabled}
+          onChange={(emailEnabled) => onUpdate({ emailEnabled })}
+          templateId={draft.emailTemplateId}
+          onTemplateChange={(emailTemplateId) => onUpdate({ emailTemplateId })}
+          csvS3Key={draft.csvS3Key}
+          contactCount={draft.csvRowCount}
+        />
+      </div>
 
       <div className="mt-6 flex justify-between">
         <button onClick={onBack} className="px-4 py-2 text-gray-600 text-sm font-medium hover:text-gray-900">

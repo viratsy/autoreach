@@ -1,5 +1,6 @@
 "use client";
 
+import { Send } from "lucide-react";
 import { Campaign } from "@/types";
 
 interface Props {
@@ -8,11 +9,20 @@ interface Props {
 
 const statusColors: Record<string, string> = {
   draft: "bg-gray-100 text-gray-700",
-  scheduled: "bg-yellow-100 text-yellow-700",
+  scheduled: "bg-amber-100 text-amber-700",
   running: "bg-blue-100 text-blue-700",
-  completed: "bg-green-100 text-green-700",
+  completed: "bg-emerald-100 text-emerald-700",
   failed: "bg-red-100 text-red-700",
   cancelled: "bg-gray-100 text-gray-500",
+};
+
+const iconColors: Record<string, string> = {
+  draft: "bg-gray-100 text-gray-500",
+  scheduled: "bg-amber-50 text-amber-600",
+  running: "bg-blue-50 text-blue-600",
+  completed: "bg-emerald-50 text-emerald-600",
+  failed: "bg-red-50 text-red-600",
+  cancelled: "bg-gray-100 text-gray-400",
 };
 
 export default function RecentCampaigns({ campaigns }: Props) {
@@ -26,66 +36,59 @@ export default function RecentCampaigns({ campaigns }: Props) {
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <div className="px-6 py-4 border-b border-gray-200">
+      <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
         <h3 className="font-semibold text-gray-900">Recent Campaigns</h3>
+        <a href="/campaigns/" className="text-xs text-primary-600 hover:text-primary-700 font-medium">
+          View all
+        </a>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600">
-            <tr>
-              <th className="text-left px-6 py-3 font-medium">Campaign</th>
-              <th className="text-left px-6 py-3 font-medium">Business</th>
-              <th className="text-left px-6 py-3 font-medium">Schedule</th>
-              <th className="text-left px-6 py-3 font-medium">Status</th>
-              <th className="text-left px-6 py-3 font-medium">Contacts</th>
-              <th className="text-left px-6 py-3 font-medium">Delivered</th>
-              <th className="text-left px-6 py-3 font-medium">Read</th>
-              <th className="text-left px-6 py-3 font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {campaigns.map((campaign) => (
-              <tr key={campaign.campaignId} className="hover:bg-gray-50">
-                <td className="px-6 py-3 font-medium text-gray-900">
-                  {campaign.campaignName}
-                </td>
-                <td className="px-6 py-3 text-gray-600">{campaign.businessName}</td>
-                <td className="px-6 py-3 text-gray-600">
-                  {campaign.scheduleDate} {campaign.scheduleTime}
-                </td>
-                <td className="px-6 py-3">
-                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[campaign.status]}`}>
-                    {campaign.status}
-                  </span>
-                </td>
-                <td className="px-6 py-3 text-gray-600">{campaign.totalContacts}</td>
-                <td className="px-6 py-3 text-gray-600">{campaign.metrics?.delivered ?? "-"}</td>
-                <td className="px-6 py-3 text-gray-600">{campaign.metrics?.read ?? "-"}</td>
-                <td className="px-6 py-3">
-                  <div className="flex gap-2">
-                    <a href={`/campaigns/view/?id=${campaign.campaignId}`} className="text-primary-600 hover:text-primary-800 text-xs font-medium">
-                      View
-                    </a>
-                    <a
-                      href="#"
-                      onClick={async (e) => {
-                        e.preventDefault();
-                        try {
-                          const { apiRequest } = await import("@/lib/api");
-                          await apiRequest(`/campaigns/${campaign.campaignId}/duplicate`, { method: "POST" });
-                          window.location.reload();
-                        } catch {}
-                      }}
-                      className="text-gray-500 hover:text-gray-700 text-xs font-medium"
-                    >
-                      Duplicate
-                    </a>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="divide-y divide-gray-100">
+        {campaigns.map((campaign) => {
+          // Real delivery % from the counters list.ts now exposes — was
+          // always "-" before since the list endpoint never returned them.
+          // Scheduled/draft campaigns haven't sent anything yet, so a literal
+          // 0 delivered there means "not started," not "0% delivery" — show
+          // the schedule instead rather than a misleadingly bare "0.0%".
+          const total = campaign.totalContacts || 0;
+          const delivered = campaign.deliveredCount ?? 0;
+          const hasStarted = campaign.status !== "scheduled" && campaign.status !== "draft";
+          const deliveryRate = total > 0 && hasStarted && campaign.deliveredCount != null ? (delivered / total) * 100 : null;
+
+          return (
+            <a
+              key={campaign.campaignId}
+              href={`/campaigns/view/?id=${campaign.campaignId}`}
+              className="flex items-center gap-3 px-6 py-3.5 hover:bg-gray-50 transition-colors"
+            >
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${iconColors[campaign.status] || iconColors.draft}`}>
+                <Send className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-gray-900 truncate">{campaign.campaignName}</p>
+                <p className="text-xs text-gray-400">
+                  {campaign.businessName} · {total.toLocaleString()} recipient{total !== 1 ? "s" : ""}
+                </p>
+              </div>
+              <span className={`text-xs px-2.5 py-1 rounded-full font-medium shrink-0 ${statusColors[campaign.status] || statusColors.draft}`}>
+                {campaign.status}
+              </span>
+              <div className="w-28 text-right shrink-0">
+                {deliveryRate !== null ? (
+                  <>
+                    <p className="text-sm font-semibold text-gray-900">{deliveryRate.toFixed(1)}%</p>
+                    <p className="text-xs text-gray-400">Delivery</p>
+                  </>
+                ) : campaign.status === "scheduled" ? (
+                  <p className="text-xs text-gray-400">
+                    {campaign.scheduleDate} {campaign.scheduleTime}
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-300">-</p>
+                )}
+              </div>
+            </a>
+          );
+        })}
       </div>
     </div>
   );

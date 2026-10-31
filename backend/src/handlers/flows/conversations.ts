@@ -3,6 +3,7 @@ import { QueryCommand, ScanCommand, PutCommand, GetCommand } from "@aws-sdk/lib-
 import { docClient } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
 import { storeConversation } from "./execute";
+import { getAuthEmail } from "../../lib/auth";
 
 const CONVERSATIONS_TABLE = process.env.CONVERSATIONS_TABLE!;
 const FLOW_INSTANCES_TABLE = process.env.FLOW_INSTANCES_TABLE!;
@@ -16,6 +17,7 @@ const BUSINESSES_TABLE = process.env.BUSINESSES_TABLE!;
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
   if (event.httpMethod === "OPTIONS") return options(origin);
+  if (!getAuthEmail(event)) return error(401, "Unauthorized", origin);
 
   const path = event.path;
 

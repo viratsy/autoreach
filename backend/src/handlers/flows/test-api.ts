@@ -1,5 +1,6 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
 import { success, error, options } from "../../lib/response";
+import { getAuthEmail } from "../../lib/auth";
 
 /**
  * POST /flows/test-api
@@ -9,6 +10,7 @@ import { success, error, options } from "../../lib/response";
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
   if (event.httpMethod === "OPTIONS") return options(origin);
+  if (!getAuthEmail(event)) return error(401, "Unauthorized", origin);
 
   try {
     const { url, method, headers, body } = JSON.parse(event.body || "{}");

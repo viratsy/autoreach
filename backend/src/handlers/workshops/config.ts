@@ -2,6 +2,7 @@ import { APIGatewayProxyHandler } from "aws-lambda";
 import { GetCommand, PutCommand, QueryCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
+import { getAuthEmail } from "../../lib/auth";
 
 const CONFIG_TABLE = process.env.WORKSHOP_CONFIG_TABLE || "autoreach-workshop-config-hardik";
 
@@ -10,10 +11,18 @@ const CONFIG_TABLE = process.env.WORKSHOP_CONFIG_TABLE || "autoreach-workshop-co
  * GET /workshops/config?wsCode=aitools&cycle=0 → get specific config
  * GET /workshops/config/list → list all configs
  * PUT /workshops/config → save/update config
+ *
+ * runKeys[runKey] is one shared { templateName, bodyParams, headerImageUrl }
+ * per run key — NOT per number. Params and template are the same message
+ * content regardless of which of the (potentially hundreds of) sending
+ * numbers delivers it; the only per-number nuance is template approval
+ * status, which is derived from the templates table at send time rather
+ * than stored here (see nightly-scheduler.ts's getAvailableNumbers).
  */
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
   if (event.httpMethod === "OPTIONS") return options(origin);
+  if (!getAuthEmail(event)) return error(401, "Unauthorized", origin);
 
   const path = event.path || "";
 

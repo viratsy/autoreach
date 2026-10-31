@@ -2,6 +2,8 @@ import { Handler } from "aws-lambda";
 import { QueryCommand, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { docClient, TABLES } from "../../lib/dynamo";
+import { getAuthEmail } from "../../lib/auth";
+import { createNotification } from "../notifications/index";
 
 const sqs = new SQSClient({});
 const SEND_QUEUE_URL = process.env.SEND_QUEUE_URL || "";
@@ -29,6 +31,16 @@ export const handler: Handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: "campaignId required" }) };
     }
 
+    // A real API Gateway call always populates requestContext; the internal
+    // Lambda-to-Lambda invokes from send-worker.ts (worker-crash recovery) send a
+    // bare {campaignId} with no requestContext at all — trust IAM for those and
+    // only require a JWT when this came in over HTTP.
+    if (event.requestContext) {
+      if (!getAuthEmail(event)) {
+        return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized" }) };
+      }
+    }
+
     console.log(`Resume: checking stuck contacts for campaign ${campaignId}`);
 
     // Get campaign
@@ -38,6 +50,18 @@ export const handler: Handler = async (event) => {
     const campaign = campResult.Item;
     if (!campaign) {
       return { statusCode: 404, body: JSON.stringify({ error: "Campaign not found" }) };
+    }
+
+    // Refuse to revive a campaign a human explicitly cancelled (or one already
+    // completed). The legitimate worker-crash auto-recovery path only ever fires
+    // while send-worker.ts still sees status "running", so this adds no new
+    // restriction there — it only blocks POST /resume from resurrecting a
+    // cancelled/completed campaign.
+    if (campaign.status === "cancelled" || campaign.status === "completed") {
+      return {
+        statusCode: 409,
+        body: JSON.stringify({ error: `Campaign is already ${campaign.status}, cannot resume` }),
+      };
     }
 
     // Get business access token
@@ -79,6 +103,39 @@ export const handler: Handler = async (event) => {
     console.log(`Resume: found ${stuckContacts.length} stuck contacts for campaign ${campaignId}`);
 
     if (stuckContacts.length === 0) {
+      // "No stuck contacts" can ALSO mean checkpoint writes have been failing
+      // outright for this campaign (e.g. every batch crashes before writing
+      // anything at all) — not just "everything already progressed past
+      // queued." Compare against completedBatches/totalBatches (the same
+      // ground truth send-worker.ts's own completion check uses) before
+      // concluding the campaign is actually done; otherwise a campaign that
+      // never sent a single message can get silently marked "completed".
+      const totalBatches = campaign.totalBatches as number | undefined;
+      const completedBatches = (campaign.completedBatches as number | undefined) || 0;
+      if (totalBatches != null && completedBatches < totalBatches) {
+        console.log(
+          `Resume: ${completedBatches}/${totalBatches} batches completed for ${campaignId} — ` +
+          `not actually done despite no stuck contacts (checkpoint writes may be failing outright)`
+        );
+        try {
+          await createNotification({
+            type: "campaign_stuck",
+            businessId: (campaign.businessId as string) || "",
+            businessName: (campaign.businessName as string) || "",
+            phoneNumberId: "",
+            phoneDisplayName: "",
+            errorMessage:
+              `Campaign has 0 stuck contacts but only ${completedBatches}/${totalBatches} batches ever ` +
+              `completed — sending may be failing before any message ever gets written. Needs manual review.`,
+            campaignId,
+          });
+        } catch { /* don't let a notification failure mask the underlying issue */ }
+        return {
+          statusCode: 200,
+          body: JSON.stringify({ message: "No stuck contacts, but batches never completed — needs investigation", resumed: 0 }),
+        };
+      }
+
       // Nothing stuck — campaign might genuinely be done, trigger completion check
       await checkAndCompletecamp(campaignId, campaign);
       return { statusCode: 200, body: JSON.stringify({ message: "No stuck contacts", resumed: 0 }) };
@@ -97,8 +154,11 @@ export const handler: Handler = async (event) => {
       numberMeta[num.phoneNumberId] = { displayName: num.displayName || "", wabaid: num.wabaid };
     }
 
-    // Re-queue in batches of BATCH_SIZE
+    // Re-queue in batches of BATCH_SIZE. Same FIFO group/dedup treatment as
+    // send.ts, so resumed batches still serialize strictly per number.
     let totalQueued = 0;
+    let resumeBatchCount = 0;
+    const resumeRunId = Date.now();
     for (const [phoneNumberId, contacts] of Object.entries(byNumber)) {
       const meta = numberMeta[phoneNumberId] || { displayName: "", wabaid: undefined };
 
@@ -107,6 +167,8 @@ export const handler: Handler = async (event) => {
         await sqs.send(
           new SendMessageCommand({
             QueueUrl: SEND_QUEUE_URL,
+            MessageGroupId: phoneNumberId,
+            MessageDeduplicationId: `resume-${campaignId}-${phoneNumberId}-${i}-${resumeRunId}`,
             MessageBody: JSON.stringify({
               campaignId,
               templateName: campaign.templateName,
@@ -114,6 +176,8 @@ export const handler: Handler = async (event) => {
               parameterMapping: campaign.parameterMapping || {},
               headerImageUrl: campaign.headerImageUrl || "",
               numbersWithImageHeader: campaign.numbersWithImageHeader || [],
+              respectUnsubscribeList: campaign.respectUnsubscribeList !== false,
+              excludePaidUsers: campaign.excludePaidUsers !== false,
               accessToken,
               isResume: true, // tells worker to skip checkpoint write (records already exist)
               batch: {
@@ -126,26 +190,53 @@ export const handler: Handler = async (event) => {
           })
         );
         totalQueued += slice.length;
+        resumeBatchCount++;
       }
     }
 
-    console.log(`Resume: re-queued ${totalQueued} contacts across ${Object.keys(byNumber).length} numbers`);
-
-    // Mark campaign as running again if it somehow got stuck in another state
-    if (campaign.status !== "running") {
+    // These are batches beyond what send.ts originally counted — grow the expected
+    // total so send-worker.ts's atomic completedBatches counter can still land on
+    // an exact match once every one of these (plus the original set) finishes.
+    if (resumeBatchCount > 0) {
       await docClient.send(
         new UpdateCommand({
           TableName: TABLES.CAMPAIGNS,
           Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" },
-          UpdateExpression: "SET #status = :s, GSI2PK = :gsi, updatedAt = :now",
-          ExpressionAttributeNames: { "#status": "status" },
-          ExpressionAttributeValues: {
-            ":s": "running",
-            ":gsi": "STATUS#running",
-            ":now": new Date().toISOString(),
-          },
+          UpdateExpression: "ADD totalBatches :rb",
+          ExpressionAttributeValues: { ":rb": resumeBatchCount },
         })
       );
+    }
+
+    console.log(`Resume: re-queued ${totalQueued} contacts across ${Object.keys(byNumber).length} numbers`);
+
+    // Mark campaign as running again if it somehow got stuck in another state.
+    // Conditioned on not-cancelled so a cancel that lands between our earlier
+    // status check and here can't be silently overwritten back to "running".
+    if (campaign.status !== "running") {
+      try {
+        await docClient.send(
+          new UpdateCommand({
+            TableName: TABLES.CAMPAIGNS,
+            Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" },
+            UpdateExpression: "SET #status = :s, GSI2PK = :gsi, updatedAt = :now",
+            ConditionExpression: "#status <> :cancelled",
+            ExpressionAttributeNames: { "#status": "status" },
+            ExpressionAttributeValues: {
+              ":s": "running",
+              ":gsi": "STATUS#running",
+              ":now": new Date().toISOString(),
+              ":cancelled": "cancelled",
+            },
+          })
+        );
+      } catch (err) {
+        if ((err as { name?: string }).name === "ConditionalCheckFailedException") {
+          console.log(`Resume: campaign ${campaignId} was cancelled concurrently, not marking running`);
+        } else {
+          throw err;
+        }
+      }
     }
 
     return {
@@ -187,7 +278,7 @@ async function checkAndCompletecamp(campaignId: string, campaign: Record<string,
       new UpdateCommand({
         TableName: TABLES.CAMPAIGNS,
         Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" },
-        UpdateExpression: "SET #status = :s, GSI2PK = :gsi, updatedAt = :now",
+        UpdateExpression: "SET #status = :s, GSI2PK = :gsi, updatedAt = :now, completedAt = :now",
         ExpressionAttributeNames: { "#status": "status" },
         ExpressionAttributeValues: {
           ":s": "completed",

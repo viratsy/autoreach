@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Sidebar from "@/components/layout/Sidebar";
+import AppShell from "@/components/layout/AppShell";
 import AuthGuard from "@/components/layout/AuthGuard";
 import { apiRequest } from "@/lib/api";
 import { Plus, Trash2, Save } from "lucide-react";
@@ -13,6 +13,7 @@ interface Workshop {
   time: string;
   runKeys: string[];
   mentorName: string;
+  whatsappDbName: string;
 }
 
 const ALL_RUN_KEYS = [
@@ -97,14 +98,12 @@ export default function WorkshopRegistryPage() {
   };
 
   const startNew = () => {
-    setEditing({ code: "", displayName: "", aliases: [], time: "7pm", runKeys: RUN_KEYS_7PM, mentorName: "" });
+    setEditing({ code: "", displayName: "", aliases: [], time: "7pm", runKeys: RUN_KEYS_7PM, mentorName: "", whatsappDbName: "" });
   };
 
   return (
     <AuthGuard>
-      <div className="flex h-screen">
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto p-6 bg-gray-50">
+      <AppShell mainClassName="flex-1 overflow-y-auto p-4 pt-20 md:p-6 bg-gray-50">
           <div className="max-w-4xl mx-auto">
             <div className="flex items-center justify-between mb-8">
               <div>
@@ -168,6 +167,13 @@ export default function WorkshopRegistryPage() {
                       <button onClick={() => setTimePreset("11am")} className={`flex-1 px-3 py-2 text-sm font-medium rounded-lg border ${editing.time === "11am" ? "bg-amber-500 text-white border-amber-500" : "bg-white text-gray-600 border-gray-200"}`}>11 AM</button>
                     </div>
                   </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 mb-1 block">WhatsAppDatabase Name</label>
+                    <input type="text" value={editing.whatsappDbName || ""} onChange={(e) => setEditing({ ...editing, whatsappDbName: e.target.value })} placeholder={editing.displayName || "defaults to Display Name"} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      Only set this if it differs from Display Name — e.g. two workshops at different times (7 PM / 11 AM) that share one row in WhatsAppDatabase under a common base name like &quot;Power BI&quot;.
+                    </p>
+                  </div>
                 </div>
 
                 {/* Aliases */}
@@ -210,8 +216,7 @@ export default function WorkshopRegistryPage() {
 
             {toast && <div className="fixed bottom-6 right-6 px-5 py-3 rounded-xl shadow-lg text-sm font-medium bg-gray-900 text-white z-50">{toast}</div>}
           </div>
-        </main>
-      </div>
+      </AppShell>
     </AuthGuard>
   );
 }

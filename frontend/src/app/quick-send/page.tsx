@@ -1,17 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Sidebar from "@/components/layout/Sidebar";
+import AppShell from "@/components/layout/AppShell";
 import AuthGuard from "@/components/layout/AuthGuard";
 import ImagePicker from "@/components/campaign/ImagePicker";
+import TemplatePreview from "@/components/campaign/TemplatePreview";
 import { apiRequest } from "@/lib/api";
-import { Business } from "@/types";
-import { Send, CheckCircle, XCircle } from "lucide-react";
+import { Business, TemplateComponent } from "@/types";
+import { Send, CheckCircle, XCircle, RefreshCw } from "lucide-react";
 
 interface TemplateInfo {
   templateName: string;
   category: string;
   parameterCount: number;
+  components: TemplateComponent[];
   availableOn: string[];
   hasImageHeaderPerNumber?: Record<string, boolean>;
 }
@@ -31,6 +33,7 @@ export default function QuickSendPage() {
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [templateName, setTemplateName] = useState("");
   const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [syncingTemplates, setSyncingTemplates] = useState(false);
   const [recipient, setRecipient] = useState("");
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const [headerImageUrl, setHeaderImageUrl] = useState("");
@@ -58,16 +61,38 @@ export default function QuickSendPage() {
     setPhoneNumberId(business.phoneNumbers[0].phoneNumberId);
   }, [businessId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
+  const loadTemplates = () => {
     if (!businessId) return;
     setLoadingTemplates(true);
-    setTemplateName("");
-    setResult(null);
     apiRequest<{ templates: TemplateInfo[] }>(`/templates?businessId=${businessId}`)
       .then((data) => setTemplates(data.templates))
       .catch(() => setTemplates([]))
       .finally(() => setLoadingTemplates(false));
+  };
+
+  useEffect(() => {
+    setTemplateName("");
+    setResult(null);
+    loadTemplates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessId]);
+
+  // A number added to a business after the last full sync has zero rows in
+  // our own DB even though real approved templates exist on Meta's side —
+  // this page had no way to fix that short of navigating to /templates, so
+  // "no templates" here often meant "never synced," not "genuinely none."
+  const syncTemplates = async () => {
+    if (!businessId) return;
+    setSyncingTemplates(true);
+    try {
+      await apiRequest("/templates/fetch", { method: "POST", body: JSON.stringify({ businessId }) });
+      loadTemplates();
+    } catch (err) {
+      console.error("Sync failed:", err);
+    } finally {
+      setSyncingTemplates(false);
+    }
+  };
 
   useEffect(() => {
     setParamValues({});
@@ -113,13 +138,12 @@ export default function QuickSendPage() {
 
   return (
     <AuthGuard>
-      <div className="flex h-screen">
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-2xl">
+      <AppShell>
+          <div className="max-w-4xl">
             <h2 className="text-2xl font-bold text-gray-900 mb-1">Quick Send</h2>
             <p className="text-sm text-gray-500 mb-6">Send a single one-off template message — no campaign needed.</p>
 
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
             <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -151,7 +175,17 @@ export default function QuickSendPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Template</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-gray-600">Template</label>
+                  <button
+                    type="button"
+                    onClick={syncTemplates}
+                    disabled={syncingTemplates || !businessId}
+                    className="flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 font-medium disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${syncingTemplates ? "animate-spin" : ""}`} /> {syncingTemplates ? "Syncing..." : "Sync Templates"}
+                  </button>
+                </div>
                 <select
                   value={templateName}
                   onChange={(e) => setTemplateName(e.target.value)}
@@ -237,9 +271,17 @@ export default function QuickSendPage() {
                 </div>
               )}
             </div>
+
+            <div className="lg:sticky lg:top-4 lg:self-start">
+              <TemplatePreview
+                template={template ? { components: template.components } : null}
+                resolvedValues={paramValues}
+                headerImageUrl={needsHeaderImage ? headerImageUrl : undefined}
+              />
+            </div>
+            </div>
           </div>
-        </main>
-      </div>
+      </AppShell>
     </AuthGuard>
   );
 }

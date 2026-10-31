@@ -17,7 +17,11 @@ Globals:
         TEMPLATES_TABLE: !Ref TemplatesTable
         CSV_BUCKET: !Ref CSVBucket
         META_ACCESS_TOKEN: !Ref MetaAccessToken
-        WEBHOOK_VERIFY_TOKEN: !Ref WebhookVerifyToken
+        # Meta's hub.verify_token, checked only during the webhook subscribe handshake
+        # (handlers/webhooks/meta-status.ts). Nothing else reads it, so rotating it does
+        # not interrupt delivery - but the new value has to be pasted into the Meta app's
+        # webhook config before anyone re-subscribes, or verification will fail there.
+        WEBHOOK_VERIFY_TOKEN: '{{resolve:secretsmanager:autoreach/webhook-verify-token:SecretString:token}}'
         BUILD_VERSION: "v10"
         SES_FROM_EMAIL: !Ref SesFromEmail
         OTP_TABLE: !Ref OTPTable
@@ -25,7 +29,19 @@ Globals:
         FLOWS_TABLE: !Ref FlowsTable
         FLOW_INSTANCES_TABLE: !Ref FlowInstancesTable
         CONVERSATIONS_TABLE: !Ref ConversationsTable
-        JWT_SECRET: !Ref WebhookVerifyToken
+        # Its own secret now. It used to be the same value as WEBHOOK_VERIFY_TOKEN, which
+        # meant one string in a committed file was both the webhook token and the key that
+        # signs every login - and anyone who could read the repo could mint a token for any
+        # allowed email. They are unrelated jobs and rotate on different schedules.
+        #
+        # Rotating this one is not free: it signs 7-day login tokens (lib/jwt.ts) AND the
+        # unsubscribe links embedded in mail already sent (lib/email-suppression.ts). A new
+        # value logs everyone out and makes every unsubscribe link already in someone's
+        # inbox stop working, which for bulk email is a compliance problem, not an
+        # inconvenience. Changing it deliberately is fine; changing it by accident is not.
+        JWT_SECRET: '{{resolve:secretsmanager:autoreach/jwt-secret:SecretString:secret}}'
+        META_APP_SECRET: !Ref MetaAppSecret
+        PHONE_LOOKUP_TABLE: !Ref PhoneLookupTable
   Api:
     Cors:
       AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
@@ -40,10 +56,19 @@ Parameters:
   WebhookVerifyToken:
     Type: String
     NoEcho: true
+  MetaAppSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: "Meta App Secret used to verify X-Hub-Signature-256 on incoming webhooks. Optional (fail-open) — leave empty until provisioned, verification is enforced once set."
   EnvName:
     Type: String
     Default: "dev"
     Description: "Environment name (hardik/navin)"
+  MentorName:
+    Type: String
+    Default: "Hardik Raja"
+    Description: "Displayed as the mentor_name template param in workshop re-engagement messages for this account"
   SesFromEmail:
     Type: String
     Default: "otp@hardikraja.com"
@@ -52,6 +77,18 @@ Parameters:
     Type: String
     Default: ""
     Description: "Meta App ID for resumable uploads"
+  ReminderFromEmail:
+    Type: String
+    Default: ""
+    Description: "SES sender for workshop reminder emails (domain must be verified in this account)"
+  LinkBaseUrl:
+    Type: String
+    Default: ""
+    Description: "Short-link domain mapped to this API — used to build unsubscribe URLs"
+  SesSendRate:
+    Type: String
+    Default: "12"
+    Description: "Emails/sec one email worker sends. Must stay under this account's SES rate limit — the worker is capped to one concurrent invocation, so this IS the account-wide send rate"
 
 Resources:
   # --- Lambda Layer ---
@@ -72,6 +109,8 @@ Resources:
     Properties:
       TableName: autoreach-businesses
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: PK
           AttributeType: S
@@ -88,6 +127,8 @@ Resources:
     Properties:
       TableName: autoreach-campaigns
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: PK
           AttributeType: S
@@ -100,6 +141,8 @@ Resources:
         - AttributeName: GSI2PK
           AttributeType: S
         - AttributeName: GSI2SK
+          AttributeType: S
+        - AttributeName: GSI3PK
           AttributeType: S
       KeySchema:
         - AttributeName: PK
@@ -123,12 +166,26 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+        # Sparse index — only campaigns created by current-batch-scheduler.ts
+        # set GSI3PK (deterministic "CURRENTBATCH#<wsCode>#<dateYMD>#<runKey>"
+        # key), so this stays empty for every campaign made any other way.
+        # Exists purely so that unattended nightly job can check "have I
+        # already created this batch's run key?" in one indexed Query instead
+        # of a full table Scan.
+        - IndexName: GSI3
+          KeySchema:
+            - AttributeName: GSI3PK
+              KeyType: HASH
+          Projection:
+            ProjectionType: KEYS_ONLY
 
   MessagesTable:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: autoreach-messages
       BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: PK
           AttributeType: S
@@ -141,6 +198,10 @@ Resources:
         - AttributeName: GSI3PK
           AttributeType: S
         - AttributeName: GSI3SK
+          AttributeType: S
+        - AttributeName: GSI4PK
+          AttributeType: S
+        - AttributeName: GSI4SK
           AttributeType: S
       KeySchema:
         - AttributeName: PK
@@ -161,6 +222,14 @@ Resources:
             - AttributeName: GSI3PK
               KeyType: HASH
             - AttributeName: GSI3SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI4
+          KeySchema:
+            - AttributeName: GSI4PK
+              KeyType: HASH
+            - AttributeName: GSI4SK
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
@@ -274,11 +343,104 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  PhoneLookupTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "autoreach-phone-lookup-${EnvName}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+
+  BillingTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "autoreach-billing-${EnvName}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: month
+          AttributeType: S
+      KeySchema:
+        - AttributeName: month
+          KeyType: HASH
+
+  EmailTemplatesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "autoreach-email-templates-${EnvName}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: runKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: runKey
+          KeyType: HASH
+
+  # Standalone email templates, picked explicitly per campaign rather than
+  # matched by run key. Separate table because the key changed from runKey to
+  # templateId, which DynamoDB cannot alter in place.
+  EmailLibraryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "autoreach-email-library-${EnvName}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: templateId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: templateId
+          KeyType: HASH
+
+  # Addresses that must never be emailed again: unsubscribes, hard bounces and
+  # spam complaints. Keyed by email rather than phone, so deliberately separate
+  # from the WhatsApp stop list.
+  EmailSuppressionTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "autoreach-email-suppression-${EnvName}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: email
+          KeyType: HASH
+
   # --- SQS ---
+  EmailQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "autoreach-email-${EnvName}"
+      # Long, because the worker paces itself to the SES send rate and a batch
+      # of 100 can legitimately take over a minute.
+      VisibilityTimeout: 960
+      MessageRetentionPeriod: 86400
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt EmailDLQ.Arn
+        maxReceiveCount: 2
+
+  EmailDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "autoreach-email-dlq-${EnvName}"
+      MessageRetentionPeriod: 1209600
+
+  # SES publishes bounces and complaints here; suppressing those fast is what
+  # keeps the sending identity (and therefore OTP login email) alive.
+  SesNotificationsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "autoreach-ses-notifications-${EnvName}"
+
   SendQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: !Sub "autoreach-send-${EnvName}"
+      QueueName: !Sub "autoreach-send-${EnvName}.fifo"
+      FifoQueue: true
+      ContentBasedDeduplication: false
       VisibilityTimeout: 360
       MessageRetentionPeriod: 86400
       RedrivePolicy:
@@ -288,7 +450,8 @@ Resources:
   SendDLQ:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: !Sub "autoreach-send-dlq-${EnvName}"
+      QueueName: !Sub "autoreach-send-dlq-${EnvName}.fifo"
+      FifoQueue: true
       MessageRetentionPeriod: 604800
 
   WebhookQueue:
@@ -314,8 +477,21 @@ Resources:
       BucketName: !Sub "autoreach-csv-${EnvName}-${AWS::AccountId}"
       LifecycleConfiguration:
         Rules:
-          - Id: AutoDelete30Days
+          # Scoped to the CSV prefixes ON PURPOSE. This used to be a single
+          # prefix-less rule expiring the WHOLE bucket at 30 days, which also
+          # caught images/ — and a template header image is referenced by
+          # workshop config and by scheduled campaigns long after it's uploaded,
+          # so images silently vanished out from under them. Meta then couldn't
+          # fetch the URL and every send failed with 131053 (media upload
+          # error); one navin batch lost ~2,500 messages that way on 15 Sep.
+          # Contact CSVs really are throwaway working files, so they still go.
+          - Id: AutoDeleteUploads30Days
             Status: Enabled
+            Prefix: uploads/
+            ExpirationInDays: 30
+          - Id: AutoDeleteRetryFailed30Days
+            Status: Enabled
+            Prefix: retry-failed/
             ExpirationInDays: 30
       CorsConfiguration:
         CorsRules:
@@ -409,7 +585,7 @@ Resources:
               Action:
                 - ses:SendEmail
                 - ses:SendRawEmail
-              Resource: "*"
+              Resource: !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*"
       Events:
         Api:
           Type: Api
@@ -452,6 +628,8 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref BusinessesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PhoneLookupTable
       Events:
         Api:
           Type: Api
@@ -466,6 +644,8 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref BusinessesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PhoneLookupTable
       Events:
         Api:
           Type: Api
@@ -488,6 +668,21 @@ Resources:
             Path: /businesses/subscribe-webhooks
             Method: POST
 
+  RegisterNumberFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/businesses/register-number.handler
+      Timeout: 30
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /businesses/register-number
+            Method: POST
+
   QualityCheckFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -502,6 +697,36 @@ Resources:
           Properties:
             Path: /businesses/quality-check
             Method: POST
+
+  WhatsAppSpendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/businesses/whatsapp-spend.handler
+      # API Gateway REST APIs hard-kill the connection at 29s regardless of
+      # this value — keep it just under that so the Lambda returns a real
+      # error response instead of API Gateway returning a bare 502.
+      Timeout: 28
+      Environment:
+        Variables:
+          # Lets a machine read this one endpoint without an inbox to receive an OTP in:
+          # the accounting stack pulls the month's WhatsApp bill nightly. Deliberately not
+          # JWT_SECRET - that value is also the Meta webhook verify token, so handing it
+          # out to sign tokens with would put webhook verification in a second place too.
+          #
+          # Resolved from Secrets Manager at deploy time, so the key is never in this repo.
+          # Create it once per account before deploying:
+          #   aws secretsmanager create-secret --name autoreach/service-api-key --secret-string '{"apiKey":"<generate one>"}'
+          # Absent or empty, no service caller is allowed - it never means "allow anyone".
+          SERVICE_API_KEY: '{{resolve:secretsmanager:autoreach/service-api-key:SecretString:apiKey}}'
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /businesses/whatsapp-spend
+            Method: GET
 
   CreateCampaignFunction:
     Type: AWS::Serverless::Function
@@ -534,6 +759,123 @@ Resources:
             Path: /campaigns
             Method: POST
 
+  UpdateCampaignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/update.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - scheduler:CreateSchedule
+                - scheduler:DeleteSchedule
+              Resource:
+                - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/autoreach-${EnvName}/*"
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource: !GetAtt SchedulerRole.Arn
+      Environment:
+        Variables:
+          SEND_FUNCTION_ARN: !GetAtt SendCampaignFunction.Arn
+          SCHEDULER_ROLE_ARN: !GetAtt SchedulerRole.Arn
+          SCHEDULER_GROUP: !Sub "autoreach-${EnvName}"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/{campaignId}
+            Method: PUT
+
+  BulkApproveCampaignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/bulk-approve.handler
+      Timeout: 30
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - scheduler:CreateSchedule
+              Resource:
+                - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/autoreach-${EnvName}/*"
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource: !GetAtt SchedulerRole.Arn
+      Environment:
+        Variables:
+          SEND_FUNCTION_ARN: !GetAtt SendCampaignFunction.Arn
+          SCHEDULER_ROLE_ARN: !GetAtt SchedulerRole.Arn
+          SCHEDULER_GROUP: !Sub "autoreach-${EnvName}"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/bulk-approve
+            Method: POST
+
+  DeleteCampaignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/delete.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/{campaignId}
+            Method: DELETE
+
+  BulkDeleteCampaignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/bulk-delete.handler
+      Timeout: 30
+      Environment:
+        Variables:
+          SCHEDULER_GROUP: !Sub "autoreach-${EnvName}"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - scheduler:DeleteSchedule
+              Resource:
+                - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/autoreach-${EnvName}/*"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/bulk-delete
+            Method: POST
+
+  AddTestNumberFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/add-test-number.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        - S3CrudPolicy:
+            BucketName: !Ref CSVBucket
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/{campaignId}/add-test-number
+            Method: POST
+
   ListCampaignsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -548,6 +890,39 @@ Resources:
             Path: /campaigns
             Method: GET
 
+  # Keeps the campaigns dashboard aggregates warm so GET /campaigns does not
+  # have to read every campaign in the table to render 20 rows. list.ts falls
+  # back to computing them inline if this has not run or is stale.
+  CampaignAggregateRefreshFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/aggregate-refresh.handler
+      Timeout: 120
+      MemorySize: 512
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+      Events:
+        Refresh:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Description: "Recompute cached campaign dashboard aggregates"
+
+  TotalCostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/total-cost.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/total-cost
+            Method: GET
+
   GetCampaignFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -557,11 +932,52 @@ Resources:
             TableName: !Ref CampaignsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref MessagesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TemplatesTable
       Events:
         Api:
           Type: Api
           Properties:
             Path: /campaigns/{campaignId}
+            Method: GET
+
+  CalendarRedirectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/links/calendar-redirect.handler
+      Timeout: 10
+      MemorySize: 256
+      Environment:
+        Variables:
+          WHATSAPP_DATABASE_TABLE: "WhatsAppDatabase"
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: "WhatsAppDatabase"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            # Public on purpose: recipients tap this straight from WhatsApp.
+            # No API-level authorizer exists on this API (handlers check the
+            # bearer token themselves via getAuthEmail), so this route is
+            # simply left without that check.
+            Path: /c/{code}
+            Method: GET
+
+  MessagesByPhoneFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/messages/by-phone.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MessagesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CampaignsTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /messages/by-phone
             Method: GET
 
   DuplicateCampaignFunction:
@@ -686,12 +1102,29 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref BusinessesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
       Events:
         Api:
           Type: Api
           Properties:
             Path: /campaigns/test-send
             Method: POST
+
+  TestSendStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/test-send-status.handler
+      Timeout: 15
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MessagesTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/test-send/status
+            Method: GET
 
   SendCampaignFunction:
     Type: AWS::Serverless::Function
@@ -702,14 +1135,19 @@ Resources:
       Environment:
         Variables:
           SEND_QUEUE_URL: !Ref SendQueue
-          STAGGER_MINUTES: "1"
+          EMAIL_QUEUE_URL: !Ref EmailQueue
+          NOTIFICATIONS_TABLE: !Sub "autoreach-notifications-${EnvName}"
       Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt EmailQueue.QueueName
         - S3ReadPolicy:
             BucketName: !Ref CSVBucket
         - DynamoDBCrudPolicy:
             TableName: !Ref BusinessesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CampaignsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-notifications-${EnvName}"
         - SQSSendMessagePolicy:
             QueueName: !GetAtt SendQueue.QueueName
 
@@ -726,7 +1164,10 @@ Resources:
           RESUME_FUNCTION_NAME: !Ref ResumeCampaignFunction
           NOTIFICATIONS_TABLE: !Sub "autoreach-notifications-${EnvName}"
           UNSUBSCRIBE_TABLE: !Sub "autoreach-unsubscribe-${EnvName}"
-          MSGS_PER_SECOND: "1.5"
+          MASTERCLASS_TABLE: "masterclass_lookup_key"
+          MSGS_PER_SECOND: "5"
+          CSV_BUCKET: !Ref CSVBucket
+          SEND_CAMPAIGN_FUNCTION_NAME: !Ref SendCampaignFunction
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref CampaignsTable
@@ -735,13 +1176,26 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref TemplatesTable
         - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+        - DynamoDBCrudPolicy:
             TableName: !Sub "autoreach-notifications-${EnvName}"
         - DynamoDBCrudPolicy:
             TableName: !Sub "autoreach-unsubscribe-${EnvName}"
+        - S3CrudPolicy:
+            BucketName: !Ref CSVBucket
         - LambdaInvokePolicy:
             FunctionName: !Ref RetryFailedFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref ResumeCampaignFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref SendCampaignFunction
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+              Resource:
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/masterclass_lookup_key"
       Events:
         SQSEvent:
           Type: SQS
@@ -759,6 +1213,9 @@ Resources:
       Environment:
         Variables:
           SEND_QUEUE_URL: !Ref SendQueue
+          NOTIFICATIONS_TABLE: !Sub "autoreach-notifications-${EnvName}"
+          CSV_BUCKET: !Ref CSVBucket
+          SEND_CAMPAIGN_FUNCTION_NAME: !Ref SendCampaignFunction
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref BusinessesTable
@@ -766,8 +1223,14 @@ Resources:
             TableName: !Ref CampaignsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref MessagesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-notifications-${EnvName}"
         - SQSSendMessagePolicy:
             QueueName: !GetAtt SendQueue.QueueName
+        - S3CrudPolicy:
+            BucketName: !Ref CSVBucket
+        - LambdaInvokePolicy:
+            FunctionName: !Ref SendCampaignFunction
       Events:
         Api:
           Type: Api
@@ -794,6 +1257,34 @@ Resources:
           Properties:
             Schedule: cron(30 19 * * ? *)
             Description: "Auto-stop campaigns still running from a previous day, 1 AM IST"
+
+  NumberHealthSweepFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/businesses/number-health-sweep.handler
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          WORKSHOP_CONFIG_TABLE: !Sub "autoreach-workshop-config-${EnvName}"
+          NOTIFICATIONS_TABLE: !Sub "autoreach-notifications-${EnvName}"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref TemplatesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-workshop-config-${EnvName}"
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-notifications-${EnvName}"
+      Events:
+        NightlySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 20 * * ? *)
+            Description: "Prune numbers removed from Business Manager + re-validate template approval on draft/scheduled campaigns, 1:30 AM IST"
 
   ResumeCampaignFunction:
     Type: AWS::Serverless::Function
@@ -859,7 +1350,12 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: dist/handlers/templates/fetch.handler
-      Timeout: 60
+      # API Gateway REST APIs hard-kill the connection at 29s regardless of
+      # this value — set just under it so the Lambda itself returns a clean
+      # error/completes before that happens, instead of silently continuing
+      # in the background past when the caller already gave up (which is
+      # exactly what made some numbers' template rows never get written).
+      Timeout: 28
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref BusinessesTable
@@ -921,7 +1417,11 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: dist/handlers/templates/copy.handler
-      Timeout: 60
+      # API Gateway REST APIs hard-kill the connection at 29s regardless of
+      # this value — measured hitting the full 60s Lambda timeout with 23
+      # concurrent targets before the fan-out fix below; 28s gives the
+      # handler room to return a clean response first.
+      Timeout: 28
       Environment:
         Variables:
           META_APP_ID: !Ref MetaAppId
@@ -1071,6 +1571,33 @@ Resources:
             Path: /workshops/config/list
             Method: GET
 
+  TestNumbersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/workshops/test-numbers.handler
+      Environment:
+        Variables:
+          WORKSHOP_CONFIG_TABLE: !Sub "autoreach-workshop-config-${EnvName}"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-workshop-config-${EnvName}"
+      Events:
+        GetApi:
+          Type: Api
+          Properties:
+            Path: /workshops/test-numbers
+            Method: GET
+        PostApi:
+          Type: Api
+          Properties:
+            Path: /workshops/test-numbers
+            Method: POST
+        DeleteApi:
+          Type: Api
+          Properties:
+            Path: /workshops/test-numbers
+            Method: DELETE
+
   WorkshopDownloadFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1095,6 +1622,15 @@ Resources:
         Variables:
           MASTERCLASS_TABLE: "masterclass_lookup_key"
           WORKSHOP_DB_TABLE: "WhatsAppDatabase"
+          # These three were previously unset — the handler read
+          # process.env.WORKSHOP_CONFIG_TABLE/BUSINESSES_TABLE with a
+          # hardcoded "-hardik"-suffixed fallback and no IAM grant at all,
+          # so on navin (and even on hardik, since nothing granted access)
+          # every config/business lookup here would fail.
+          WORKSHOP_CONFIG_TABLE: !Sub "autoreach-workshop-config-${EnvName}"
+          BUSINESSES_TABLE: !Ref BusinessesTable
+          TEMPLATES_TABLE: !Ref TemplatesTable
+          MENTOR_NAME: !Ref MentorName
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Sub "autoreach-reengagement-${EnvName}"
@@ -1108,12 +1644,251 @@ Resources:
               Resource:
                 - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/masterclass_lookup_key"
                 - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/WhatsAppDatabase"
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/autoreach-workshop-config-${EnvName}"
+                - !GetAtt BusinessesTable.Arn
+                - !GetAtt TemplatesTable.Arn
       Events:
         NightlySchedule:
           Type: Schedule
           Properties:
             Schedule: cron(30 19 * * ? *)
             Description: "Workshop re-engagement nightly at 1 AM IST"
+
+  NumberRotationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/businesses/number-rotation.handler
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          ROTATION_TARGET_FUNCTION: "free_workshop_meta"
+          # Both accounts' signup flows run on RED numbers only.
+          SIGNUP_POOL_QUALITIES: "RED"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BusinessesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref TemplatesTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - lambda:GetFunctionConfiguration
+                - lambda:UpdateFunctionConfiguration
+              Resource:
+                - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:free_workshop_meta"
+      Events:
+        DailySchedule:
+          Type: Schedule
+          Properties:
+            # 9:00 AM IST — 30 min after DailySyncFunction's template sync, so a
+            # template approved overnight is already recorded before numbers are
+            # tested for eligibility.
+            Schedule: cron(30 3 * * ? *)
+            Description: "Rotate free_workshop_meta sender pool by number quality at 9 AM IST"
+
+  # Projects the signup confirmations free_workshop_meta logs in comm_messages
+  # into read-only "<date>_<workshop>_signup" campaigns so their delivery stats
+  # show in the campaigns list. comm_messages is outside this stack.
+  SignupCampaignSyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/workshops/signup-campaign-sync.handler
+      Timeout: 300
+      MemorySize: 512
+      ReservedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          COMM_TABLE: comm_messages
+          WORKSHOP_REGISTRY_TABLE: !Sub "autoreach-workshop-registry-${EnvName}"
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref BusinessesTable
+        - DynamoDBReadPolicy:
+            TableName: !Sub "autoreach-workshop-registry-${EnvName}"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/comm_messages/index/*"
+      Events:
+        Every10Minutes:
+          Type: Schedule
+          Properties:
+            Schedule: rate(10 minutes)
+            Description: "Refresh signup-message campaigns from comm_messages"
+
+  CrossaleBatchesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/crossale/batches.handler
+      Timeout: 28
+      MemorySize: 512
+      Environment:
+        Variables:
+          DATABASE_TABLE: "database"
+          WORKSHOP_REGISTRY_TABLE: !Sub "autoreach-workshop-registry-${EnvName}"
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: "database"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "autoreach-workshop-registry-${EnvName}"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /crossale/batches
+            Method: GET
+
+  CrossaleLeadsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/crossale/leads.handler
+      Timeout: 28
+      MemorySize: 512
+      Environment:
+        Variables:
+          DATABASE_TABLE: "database"
+          WORKSHOP_REGISTRY_TABLE: !Sub "autoreach-workshop-registry-${EnvName}"
+          MASTERCLASS_TABLE: "masterclass_lookup_key"
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: "database"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "autoreach-workshop-registry-${EnvName}"
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:BatchGetItem
+              Resource:
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/masterclass_lookup_key"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /crossale/leads
+            Method: POST
+
+  CrossaleCreateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/crossale/create.handler
+      Timeout: 28
+      MemorySize: 512
+      Environment:
+        Variables:
+          DATABASE_TABLE: "database"
+          WORKSHOP_REGISTRY_TABLE: !Sub "autoreach-workshop-registry-${EnvName}"
+          WORKSHOP_CONFIG_TABLE: !Sub "autoreach-workshop-config-${EnvName}"
+          CSV_BUCKET: !Ref CSVBucket
+          SEND_FUNCTION_ARN: !GetAtt SendCampaignFunction.Arn
+          SCHEDULER_ROLE_ARN: !GetAtt SchedulerRole.Arn
+          SCHEDULER_GROUP: !Sub "autoreach-${EnvName}"
+          MENTOR_NAME: !Ref MentorName
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: "database"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "autoreach-workshop-registry-${EnvName}"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "autoreach-workshop-config-${EnvName}"
+        - DynamoDBReadPolicy:
+            TableName: !Ref BusinessesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref TemplatesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        - S3CrudPolicy:
+            BucketName: !Ref CSVBucket
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - scheduler:CreateSchedule
+                - scheduler:DeleteSchedule
+              Resource:
+                - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/autoreach-${EnvName}/*"
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource: !GetAtt SchedulerRole.Arn
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /crossale/create
+            Method: POST
+
+  CurrentBatchSchedulerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/workshops/current-batch-scheduler.handler
+      Timeout: 120
+      MemorySize: 256
+      Environment:
+        Variables:
+          DATABASE_TABLE: "database"
+          WHATSAPP_DATABASE_TABLE: "WhatsAppDatabase"
+          WORKSHOP_REGISTRY_TABLE: !Sub "autoreach-workshop-registry-${EnvName}"
+          WORKSHOP_CONFIG_TABLE: !Sub "autoreach-workshop-config-${EnvName}"
+          CSV_BUCKET: !Ref CSVBucket
+          MENTOR_NAME: !Ref MentorName
+          NOTIFICATIONS_TABLE: !Sub "autoreach-notifications-${EnvName}"
+          # Campaigns that pass pre-flight are created already scheduled, which
+          # means this function now creates EventBridge schedules too — exactly
+          # as CrossaleCreateFunction does.
+          SEND_FUNCTION_ARN: !GetAtt SendCampaignFunction.Arn
+          SCHEDULER_ROLE_ARN: !GetAtt SchedulerRole.Arn
+          SCHEDULER_GROUP: !Sub "autoreach-${EnvName}"
+          # Email rides along whenever a library template claims the run key.
+          EMAIL_LIBRARY_TABLE: !Ref EmailLibraryTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EmailLibraryTable
+        - DynamoDBReadPolicy:
+            TableName: "database"
+        - DynamoDBReadPolicy:
+            TableName: "WhatsAppDatabase"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "autoreach-workshop-registry-${EnvName}"
+        - DynamoDBReadPolicy:
+            TableName: !Sub "autoreach-workshop-config-${EnvName}"
+        - DynamoDBReadPolicy:
+            TableName: !Ref BusinessesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref TemplatesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        - S3CrudPolicy:
+            BucketName: !Ref CSVBucket
+        # Pre-flight failures are surfaced as notifications rather than only logged.
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-notifications-${EnvName}"
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - scheduler:CreateSchedule
+                - scheduler:DeleteSchedule
+              Resource:
+                - !Sub "arn:aws:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/autoreach-${EnvName}/*"
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource: !GetAtt SchedulerRole.Arn
+      Events:
+        NightlySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(30 minutes)
+            Description: "Current-batch: auto-schedule due campaigns that pass pre-flight, hold the rest as drafts, and top up existing ones with new registrants"
 
   MetaWebhookFunction:
     Type: AWS::Serverless::Function
@@ -1150,11 +1925,26 @@ Resources:
           FLOW_INSTANCES_TABLE: !Ref FlowInstancesTable
           CONVERSATIONS_TABLE: !Ref ConversationsTable
           UNSUBSCRIBE_TABLE: !Sub "autoreach-unsubscribe-${EnvName}"
+          COMM_TABLE: comm_messages
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref MessagesTable
         - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        - DynamoDBCrudPolicy:
             TableName: !Ref BusinessesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PhoneLookupTable
+        # comm_messages lives outside this stack (owned by free_workshop_meta);
+        # only the signup-row status updates are needed here.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:UpdateItem
+              Resource:
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/comm_messages"
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/comm_messages/index/*"
         - DynamoDBCrudPolicy:
             TableName: !Ref FlowsTable
         - DynamoDBCrudPolicy:
@@ -1309,6 +2099,259 @@ Resources:
           Properties:
             Path: /flows/test-api
             Method: POST
+
+  # --- AWS billing attribution ---
+  # Splits the AWS bill into AutoReach's share and everything else's. Reads
+  # usage metrics rather than cost allocation tags, because tags are not applied
+  # retroactively and so can never explain a past month.
+  BillingComputeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "autoreach-billing-compute-${EnvName}"
+      Handler: dist/handlers/billing/compute.handler
+      # Reads ~500 CloudWatch metrics plus a DescribeTable per table, so it runs
+      # far longer than an API-fronted function is allowed to.
+      Timeout: 600
+      MemorySize: 1024
+      Environment:
+        Variables:
+          BILLING_TABLE: !Ref BillingTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BillingTable
+        - Version: "2012-10-17"
+          Statement:
+            # All read-only: cost figures plus the usage metrics and resource
+            # inventories needed to apportion them.
+            - Effect: Allow
+              Action:
+                - ce:GetCostAndUsage
+                - cloudwatch:GetMetricData
+                - dynamodb:ListTables
+                - dynamodb:DescribeTable
+                - lambda:ListFunctions
+                - apigateway:GET
+                - sqs:ListQueues
+                - logs:DescribeLogGroups
+                - s3:ListAllMyBuckets
+              Resource: "*"
+      Events:
+        DailySchedule:
+          Type: Schedule
+          Properties:
+            # 07:00 IST daily. Keeps the open month current, and on the 1st to
+            # 5th also settles the month that just ended (see compute.ts).
+            Schedule: cron(30 1 * * ? *)
+            Description: "Recompute AutoReach's AWS cost share at 7 AM IST"
+
+  BillingGetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/billing/get.handler
+      Timeout: 28
+      Environment:
+        Variables:
+          BILLING_TABLE: !Ref BillingTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref BillingTable
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /billing
+            Method: GET
+
+  BillingRefreshFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/billing/refresh.handler
+      Timeout: 28
+      Environment:
+        Variables:
+          BILLING_TABLE: !Ref BillingTable
+          BILLING_COMPUTE_FUNCTION: !Ref BillingComputeFunction
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref BillingTable
+        - LambdaInvokePolicy:
+            FunctionName: !Ref BillingComputeFunction
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /billing/refresh
+            Method: POST
+
+  # --- Email (rides along with each WhatsApp campaign) ---
+  EmailWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/email-worker.handler
+      # Paces itself to the SES send rate, so a 100-contact batch can run for
+      # well over a minute; must stay under EmailQueue's VisibilityTimeout.
+      Timeout: 900
+      MemorySize: 512
+      # The pacing below is per invocation, and SQS scales this function out to
+      # ~5 concurrent batches the moment a campaign queues. Five workers each
+      # pacing to SesSendRate is five times the account's SES rate limit, and
+      # everything over it comes back as TooManyRequestsException — counted as
+      # a failed email and never retried. Capping at one invocation is what
+      # makes SesSendRate mean the account-wide rate it claims to.
+      ReservedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          EMAIL_LIBRARY_TABLE: !Ref EmailLibraryTable
+          EMAIL_SUPPRESSION_TABLE: !Ref EmailSuppressionTable
+          REMINDER_FROM_EMAIL: !Ref ReminderFromEmail
+          LINK_BASE_URL: !Ref LinkBaseUrl
+          SES_CONFIGURATION_SET: !Sub "autoreach-${EnvName}"
+          SES_SEND_RATE: !Ref SesSendRate
+          ENV_NAME: !Ref EnvName
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EmailLibraryTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref EmailSuppressionTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        # Per-recipient email rows live beside the WhatsApp message rows.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource: "*"
+      Events:
+        EmailQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt EmailQueue.Arn
+            BatchSize: 1
+
+  UnsubscribeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/links/unsubscribe-redirect.handler
+      Timeout: 10
+      Environment:
+        Variables:
+          EMAIL_SUPPRESSION_TABLE: !Ref EmailSuppressionTable
+          ENV_NAME: !Ref EnvName
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EmailSuppressionTable
+      Events:
+        # Public on purpose, and unauthenticated by design: bulk-sender rules
+        # require unsubscribe to work in one click with no login. The token is
+        # HMAC-signed so it can't be used to unsubscribe someone else.
+        GetApi:
+          Type: Api
+          Properties:
+            Path: /u/{token}
+            Method: GET
+        # Gmail/Yahoo one-click (List-Unsubscribe-Post).
+        PostApi:
+          Type: Api
+          Properties:
+            Path: /u/{token}
+            Method: POST
+
+  SesNotificationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/webhooks/ses-notifications.handler
+      Timeout: 30
+      Environment:
+        Variables:
+          EMAIL_SUPPRESSION_TABLE: !Ref EmailSuppressionTable
+          ENV_NAME: !Ref EnvName
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EmailSuppressionTable
+        # Open/click/bounce/complaint events increment counters on the
+        # campaign's STATS item, so this needs the campaigns table too.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CampaignsTable
+        # Stamps delivery/open/click/bounce onto the per-recipient email rows.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MessagesTable
+      Events:
+        SnsEvent:
+          Type: SNS
+          Properties:
+            Topic: !Ref SesNotificationsTopic
+
+  TestEmailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/test-email.handler
+      Timeout: 28
+      Environment:
+        Variables:
+          EMAIL_LIBRARY_TABLE: !Ref EmailLibraryTable
+          EMAIL_SUPPRESSION_TABLE: !Ref EmailSuppressionTable
+          REMINDER_FROM_EMAIL: !Ref ReminderFromEmail
+          LINK_BASE_URL: !Ref LinkBaseUrl
+          SES_CONFIGURATION_SET: !Sub "autoreach-${EnvName}"
+          ENV_NAME: !Ref EnvName
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref EmailLibraryTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CampaignsTable
+        - S3ReadPolicy:
+            BucketName: !Ref CSVBucket
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource: "*"
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /campaigns/{campaignId}/test-email
+            Method: POST
+        # Same handler, no campaign: the wizard tests the email on the Test
+        # Message step, before the campaign has been created.
+        DraftApi:
+          Type: Api
+          Properties:
+            Path: /campaigns/test-email
+            Method: POST
+
+  EmailTemplatesApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/email-templates-api.handler
+      Timeout: 28
+      Environment:
+        Variables:
+          EMAIL_LIBRARY_TABLE: !Ref EmailLibraryTable
+          ENV_NAME: !Ref EnvName
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EmailLibraryTable
+      Events:
+        GetApi:
+          Type: Api
+          Properties:
+            Path: /email-templates
+            Method: GET
+        PutApi:
+          Type: Api
+          Properties:
+            Path: /email-templates
+            Method: PUT
+        DeleteApi:
+          Type: Api
+          Properties:
+            Path: /email-templates
+            Method: DELETE
 
 Outputs:
   ApiUrl:

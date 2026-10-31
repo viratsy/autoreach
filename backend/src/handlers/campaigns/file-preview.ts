@@ -1,6 +1,8 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
 import { S3Client, GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { success, error, options } from "../../lib/response";
+import { getAuthEmail } from "../../lib/auth";
+import { parseCSVWithHeaders } from "../../lib/csv";
 
 const s3 = new S3Client({});
 const BUCKET = process.env.CSV_BUCKET!;
@@ -13,6 +15,7 @@ const BUCKET = process.env.CSV_BUCKET!;
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
   if (event.httpMethod === "OPTIONS") return options(origin);
+  if (!getAuthEmail(event)) return error(401, "Unauthorized", origin);
 
   try {
     const s3Key = event.queryStringParameters?.s3Key;
@@ -36,26 +39,22 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     );
 
     const csvText = await result.Body!.transformToString();
-    const lines = csvText.trim().split("\n");
-    const headers = lines[0].split(",").map((h) => h.trim());
+    const rawLineCount = csvText.trim().split("\n").length; // rough estimate only, see below
+    const { headers, records } = parseCSVWithHeaders(csvText);
 
-    // For total row count on large files, estimate from file size
+    // For total row count on large files, estimate from file size.
+    // This stays a raw-newline-based estimate (imprecise if a quoted field embeds
+    // a newline) since it's only an approximation for truncated large files anyway.
     let totalRows: number;
-    if (range && lines.length > 1) {
-      // Estimate: average row size * total file size
-      const avgRowSize = csvText.length / lines.length;
+    if (range && rawLineCount > 1) {
+      const avgRowSize = csvText.length / rawLineCount;
       totalRows = Math.floor(fileSize / avgRowSize) - 1;
     } else {
-      totalRows = lines.length - 1;
+      totalRows = records.length;
     }
 
     // Only first 10 rows for preview
-    const preview = lines.slice(1, 11).map((line) => {
-      const values = line.split(",").map((v) => v.trim());
-      const row: Record<string, string> = {};
-      headers.forEach((h, i) => (row[h] = values[i] || ""));
-      return row;
-    });
+    const preview = records.slice(0, 10);
 
     return success({ headers, totalRows, preview }, origin);
   } catch (err) {

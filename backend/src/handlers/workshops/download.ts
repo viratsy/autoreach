@@ -4,6 +4,11 @@ import { docClient } from "../../lib/dynamo";
 
 const REENGAGEMENT_TABLE = process.env.REENGAGEMENT_TABLE!;
 
+// NOTE: opened via window.open() from the frontend (frontend/src/app/workshops/page.tsx),
+// a plain browser navigation that carries no Authorization header — cannot use the
+// standard Bearer-token check here without a frontend change (e.g. a short-lived signed
+// download link) to accompany it. Left unauthenticated deliberately; tracked as a follow-up.
+
 /**
  * Download contacts as CSV.
  * GET /workshops/download?wsCode=aitools&status=active

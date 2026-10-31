@@ -7,6 +7,10 @@ export const ALLOWED_EMAILS = [
   "amitrawoolwork@gmail.com",
   "tusharsmhadlekar123@gmail.com",
   "rohitrk131099@gmail.com",
+  "hi@navinparmar.in",
+  "vinaych9090@gmail.com",
+  "jatanshah45@gmail.com",
+  "hi@hardikraja.com",
 ];
 
 export function isEmailAllowed(email: string): boolean {

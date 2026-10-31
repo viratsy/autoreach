@@ -5,6 +5,7 @@ import { docClient, TABLES } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
 import { PhoneNumber, Provider } from "../../lib/types";
 import { getAuthEmail } from "../../lib/auth";
+import { upsertPhoneNumberLookups } from "../../lib/phone-lookup";
 
 /**
  * Create a new business. Supports meta, aisensy, and wati providers.
@@ -53,6 +54,17 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     const businessId = `biz_${randomBytes(4).toString("hex")}`;
     const now = new Date().toISOString();
 
+    // Meta's API doesn't reliably return the real 24h messaging tier via the
+    // phone-number endpoint (confirmed — quality-check.ts's fetch comes back
+    // empty), so new numbers default to TIER_100K here rather than showing an
+    // overly-conservative capacity warning for numbers nobody's had a chance to
+    // check yet. This is a placeholder assumption, not a verified value — update
+    // it manually if a number's real tier is ever known to be lower.
+    const numbersWithDefaultTier = phoneNumbers.map((pn) => ({
+      ...pn,
+      messagingLimit: pn.messagingLimit || "TIER_100K",
+    }));
+
     await docClient.send(
       new PutCommand({
         TableName: TABLES.BUSINESSES,
@@ -64,12 +76,14 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           provider,
           accessToken: body.accessToken || "",
           metaBusinessId: body.metaBusinessId || "",
-          phoneNumbers,
+          phoneNumbers: numbersWithDefaultTier,
           createdAt: now,
           updatedAt: now,
         },
       })
     );
+
+    await upsertPhoneNumberLookups(businessId, phoneNumbers.map((pn) => pn.phoneNumberId));
 
     return success({ businessId }, origin);
   } catch (err) {

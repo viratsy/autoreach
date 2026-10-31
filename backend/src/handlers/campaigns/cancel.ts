@@ -3,6 +3,8 @@ import { GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { SchedulerClient, DeleteScheduleCommand } from "@aws-sdk/client-scheduler";
 import { docClient, TABLES } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
+import { getAuthEmail } from "../../lib/auth";
+import { buildScheduleName } from "../../lib/campaign-factory";
 
 const scheduler = new SchedulerClient({});
 const SCHEDULER_GROUP = process.env.SCHEDULER_GROUP || "default";
@@ -14,6 +16,7 @@ const SCHEDULER_GROUP = process.env.SCHEDULER_GROUP || "default";
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
   if (event.httpMethod === "OPTIONS") return options(origin);
+  if (!getAuthEmail(event)) return error(401, "Unauthorized", origin);
 
   try {
     const campaignId = event.pathParameters?.campaignId;
@@ -26,22 +29,39 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     const campaign = result.Item;
     if (!campaign) return error(404, "Campaign not found", origin);
     
-    // Handle running campaigns — stop and mark as completed
+    // Handle running campaigns — stop and mark as cancelled. Must be
+    // "cancelled" specifically, not "completed": send-worker.ts's per-batch
+    // check that skips already-queued SQS messages for a stopped campaign
+    // only matches status === "cancelled" — marking it "completed" instead
+    // (as this used to) left every batch already in flight to keep sending
+    // regardless, so "Stop" only updated the dashboard label without
+    // actually stopping anything still queued.
+    // ConditionExpression guards against a concurrent auto-stop / send-worker
+    // completion flipping the status between our Get and this Update.
     if (campaign.status === "running") {
-      await docClient.send(
-        new UpdateCommand({
-          TableName: TABLES.CAMPAIGNS,
-          Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" },
-          UpdateExpression: "SET #status = :status, GSI2PK = :gsi2pk, updatedAt = :now",
-          ExpressionAttributeNames: { "#status": "status" },
-          ExpressionAttributeValues: {
-            ":status": "completed",
-            ":gsi2pk": "STATUS#completed",
-            ":now": new Date().toISOString(),
-          },
-        })
-      );
-      return success({ message: "Campaign stopped and marked as completed" }, origin);
+      try {
+        await docClient.send(
+          new UpdateCommand({
+            TableName: TABLES.CAMPAIGNS,
+            Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" },
+            UpdateExpression: "SET #status = :status, GSI2PK = :gsi2pk, updatedAt = :now, completedAt = :now",
+            ConditionExpression: "#status = :expected",
+            ExpressionAttributeNames: { "#status": "status" },
+            ExpressionAttributeValues: {
+              ":status": "cancelled",
+              ":gsi2pk": "STATUS#cancelled",
+              ":now": new Date().toISOString(),
+              ":expected": "running",
+            },
+          })
+        );
+        return success({ message: "Campaign stopped" }, origin);
+      } catch (err) {
+        if ((err as { name?: string }).name === "ConditionalCheckFailedException") {
+          return error(409, "Campaign status changed concurrently — please refresh and try again", origin);
+        }
+        throw err;
+      }
     }
 
     if (campaign.status !== "scheduled") return error(400, "Only scheduled or running campaigns can be stopped", origin);
@@ -50,7 +70,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     try {
       await scheduler.send(
         new DeleteScheduleCommand({
-          Name: `autoreach-${campaignId}`,
+          Name: buildScheduleName(campaignId),
           GroupName: SCHEDULER_GROUP,
         })
       );
@@ -59,19 +79,28 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     }
 
     // Update status
-    await docClient.send(
-      new UpdateCommand({
-        TableName: TABLES.CAMPAIGNS,
-        Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" },
-        UpdateExpression: "SET #status = :status, GSI2PK = :gsi2pk, updatedAt = :now",
-        ExpressionAttributeNames: { "#status": "status" },
-        ExpressionAttributeValues: {
-          ":status": "cancelled",
-          ":gsi2pk": "STATUS#cancelled",
-          ":now": new Date().toISOString(),
-        },
-      })
-    );
+    try {
+      await docClient.send(
+        new UpdateCommand({
+          TableName: TABLES.CAMPAIGNS,
+          Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" },
+          UpdateExpression: "SET #status = :status, GSI2PK = :gsi2pk, updatedAt = :now",
+          ConditionExpression: "#status = :expected",
+          ExpressionAttributeNames: { "#status": "status" },
+          ExpressionAttributeValues: {
+            ":status": "cancelled",
+            ":gsi2pk": "STATUS#cancelled",
+            ":now": new Date().toISOString(),
+            ":expected": "scheduled",
+          },
+        })
+      );
+    } catch (err) {
+      if ((err as { name?: string }).name === "ConditionalCheckFailedException") {
+        return error(409, "Campaign status changed concurrently — please refresh and try again", origin);
+      }
+      throw err;
+    }
 
     return success({ message: "Campaign cancelled" }, origin);
   } catch (err) {

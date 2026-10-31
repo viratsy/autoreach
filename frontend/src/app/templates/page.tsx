@@ -2,10 +2,10 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import Sidebar from "@/components/layout/Sidebar";
+import AppShell from "@/components/layout/AppShell";
 import AuthGuard from "@/components/layout/AuthGuard";
 import { apiRequest } from "@/lib/api";
-import { Copy, CheckCircle, XCircle, RefreshCw, ExternalLink, Plus } from "lucide-react";
+import { Copy, CheckCircle, XCircle, RefreshCw, ExternalLink, Plus, Trash2 } from "lucide-react";
 import ImagePicker from "@/components/campaign/ImagePicker";
 import { Provider } from "@/types";
 
@@ -40,12 +40,17 @@ function TemplatesContent() {
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [syncingTemplate, setSyncingTemplate] = useState<string | null>(null);
+  const [syncingNumber, setSyncingNumber] = useState<string | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<"ALL" | "UTILITY" | "MARKETING">("ALL");
 
   // Copy state
   const [copyTemplate, setCopyTemplate] = useState<TemplateInfo | null>(null);
   const [sourceNumber, setSourceNumber] = useState("");
+  const [copyTargetBusinessId, setCopyTargetBusinessId] = useState("");
   const [targetWabas, setTargetWabas] = useState<string[]>([]);
   const [copying, setCopying] = useState(false);
   const [copyResults, setCopyResults] = useState<{ wabaid: string; status: string; error?: string }[]>([]);
@@ -57,9 +62,11 @@ function TemplatesContent() {
   const [newCategory, setNewCategory] = useState<"UTILITY" | "MARKETING">("UTILITY");
   const [newLanguage, setNewLanguage] = useState("en_US");
   const [newBody, setNewBody] = useState("");
+  const [newBodyExamples, setNewBodyExamples] = useState<Record<string, string>>({});
   const [newHeaderText, setNewHeaderText] = useState("");
   const [newHeaderImageUrl, setNewHeaderImageUrl] = useState("");
   const [newFooter, setNewFooter] = useState("");
+  const [newButtons, setNewButtons] = useState<{ type: "QUICK_REPLY" | "PHONE_NUMBER" | "URL"; text: string; phoneNumber?: string; url?: string }[]>([]);
   const [newTargets, setNewTargets] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [createResults, setCreateResults] = useState<{ phoneNumberId: string; displayName: string; status: string; error?: string }[]>([]);
@@ -107,6 +114,53 @@ function TemplatesContent() {
     } catch {} finally { setSyncing(false); }
   };
 
+  // Deletes every stored template row for this business first, then re-fetches
+  // from scratch — unlike syncTemplates (an upsert), this also clears rows for
+  // templates Meta no longer returns at all (deleted/renamed on Meta's side).
+  const clearAndResync = async () => {
+    if (!selectedBiz) return;
+    setClearing(true);
+    setShowClearConfirm(false);
+    try {
+      await apiRequest("/templates/fetch", {
+        method: "POST",
+        body: JSON.stringify({ businessId: selectedBiz.businessId, clearFirst: true }),
+      });
+      await loadTemplates();
+    } catch {} finally { setClearing(false); }
+  };
+
+  // Re-syncs just one template (across every number) instead of the whole
+  // catalog — for refreshing a single row that looks stale without waiting
+  // on a full re-fetch of everything else too.
+  const syncOneTemplate = async (templateName: string) => {
+    if (!selectedBiz) return;
+    setSyncingTemplate(templateName);
+    try {
+      await apiRequest("/templates/fetch", {
+        method: "POST",
+        body: JSON.stringify({ businessId: selectedBiz.businessId, templateName }),
+      });
+      await loadTemplates();
+    } catch {} finally { setSyncingTemplate(null); }
+  };
+
+  // Re-syncs just one phone number (a single Meta call for its WABA) instead
+  // of fanning out to every number at once — isolates whether a number's
+  // sync issue is a real absence of templates on Meta's side, versus an
+  // artifact of the full sync's concurrent fan-out.
+  const syncOneNumber = async (phoneNumberId: string) => {
+    if (!selectedBiz) return;
+    setSyncingNumber(phoneNumberId);
+    try {
+      await apiRequest("/templates/fetch", {
+        method: "POST",
+        body: JSON.stringify({ businessId: selectedBiz.businessId, phoneNumberId }),
+      });
+      await loadTemplates();
+    } catch {} finally { setSyncingNumber(null); }
+  };
+
   const handleCopy = async () => {
     if (!selectedBiz || !copyTemplate || !sourceNumber || targetWabas.length === 0) return;
     setCopying(true);
@@ -121,6 +175,7 @@ function TemplatesContent() {
             sourcePhoneNumberId: sourceNumber,
             templateName: copyTemplate.templateName,
             targetWabaIds: targetWabas,
+            targetBusinessId: copyTargetBusinessId && copyTargetBusinessId !== selectedBiz.businessId ? copyTargetBusinessId : undefined,
             headerImageUrl: headerImageUrl || undefined,
           }),
         }
@@ -148,12 +203,31 @@ function TemplatesContent() {
     setNewCategory("UTILITY");
     setNewLanguage("en_US");
     setNewBody("");
+    setNewBodyExamples({});
     setNewHeaderText("");
     setNewHeaderImageUrl("");
     setNewFooter("");
+    setNewButtons([]);
     setNewTargets([]);
     setCreateResults([]);
   };
+
+  const addNewButton = () => {
+    if (newButtons.length >= 3) return; // matches Meta's 3-button no-"see all" limit
+    setNewButtons((prev) => [...prev, { type: "QUICK_REPLY", text: "" }]);
+  };
+  const updateNewButton = (i: number, updates: Partial<(typeof newButtons)[number]>) => {
+    setNewButtons((prev) => prev.map((b, bi) => (bi === i ? { ...b, ...updates } : b)));
+  };
+  const removeNewButton = (i: number) => {
+    setNewButtons((prev) => prev.filter((_, bi) => bi !== i));
+  };
+
+  // Variable numbers referenced in the body text, in ascending order — drives
+  // the per-variable example-value inputs Meta requires for template approval.
+  const newBodyParamNumbers = Array.from(
+    new Set(Array.from(newBody.matchAll(/\{\{(\d+)\}\}/g)).map((m) => m[1]))
+  ).sort((a, b) => Number(a) - Number(b));
 
   const handleCreateTemplate = async () => {
     if (!selectedBiz || !newName.trim() || !newBody.trim() || newTargets.length === 0) return;
@@ -168,9 +242,11 @@ function TemplatesContent() {
           category: newCategory,
           language: newLanguage,
           bodyText: newBody,
+          bodyExamples: newBodyParamNumbers.map((n) => newBodyExamples[n]?.trim() || `Example${n}`),
           headerText: newHeaderImageUrl ? undefined : newHeaderText || undefined,
           headerImageUrl: newHeaderImageUrl || undefined,
           footerText: newFooter || undefined,
+          buttons: newButtons.length > 0 ? newButtons : undefined,
           targetPhoneNumberIds: newTargets,
         }),
       });
@@ -219,13 +295,11 @@ function TemplatesContent() {
     selectedBiz?.phoneNumbers.find((p) => p.phoneNumberId === phoneNumberId)?.displayName || phoneNumberId;
 
   const getNumberByWaba = (wabaid: string) =>
-    selectedBiz?.phoneNumbers.find((p) => p.wabaid === wabaid);
+    businesses.flatMap((b) => b.phoneNumbers).find((p) => p.wabaid === wabaid);
 
   return (
     <AuthGuard>
-      <div className="flex h-screen">
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto p-6">
+      <AppShell>
           <div className="max-w-5xl">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-gray-900">Templates</h2>
@@ -251,12 +325,48 @@ function TemplatesContent() {
                 {(selectedBiz?.provider || "meta") !== "aisensy" && (
                   <button
                     onClick={syncTemplates}
-                    disabled={syncing}
+                    disabled={syncing || clearing}
                     className="flex items-center gap-1 text-sm text-primary-600 hover:text-primary-700 disabled:opacity-50"
                   >
                     <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
                     {syncing ? "Syncing..." : selectedBiz?.provider === "wati" ? "Sync from WATI" : "Sync from Meta"}
                   </button>
+                )}
+                {(selectedBiz?.provider || "meta") !== "aisensy" && (
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowClearConfirm((v) => !v)}
+                      disabled={syncing || clearing}
+                      title="Delete all stored templates for this business, then re-fetch from scratch"
+                      className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
+                    >
+                      <Trash2 className={`w-4 h-4 ${clearing ? "animate-pulse" : ""}`} />
+                      {clearing ? "Clearing & resyncing..." : "Clear & Resync"}
+                    </button>
+                    {showClearConfirm && (
+                      <>
+                        <div className="fixed inset-0 z-10" onClick={() => setShowClearConfirm(false)} />
+                        <div className="absolute right-0 mt-2 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-20 p-3 text-sm">
+                          <p className="text-gray-700 mb-3">
+                            This deletes every stored template for <span className="font-medium">{selectedBiz?.businessName}</span> and
+                            re-fetches fresh from {selectedBiz?.provider === "wati" ? "WATI" : "Meta"}. Useful for clearing stale
+                            templates Meta no longer returns. This can&apos;t be undone.
+                          </p>
+                          <div className="flex justify-end gap-2">
+                            <button onClick={() => setShowClearConfirm(false)} className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1">
+                              Cancel
+                            </button>
+                            <button
+                              onClick={clearAndResync}
+                              className="text-xs bg-red-600 hover:bg-red-700 text-white font-medium px-3 py-1.5 rounded-md"
+                            >
+                              Yes, clear & resync
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -340,7 +450,7 @@ function TemplatesContent() {
                             return (
                             <span
                               key={pn.phoneNumberId}
-                              className={`text-xs px-1.5 py-0.5 rounded ${
+                              className={`group relative text-xs px-1.5 py-0.5 rounded ${
                                 isRejected ? "bg-red-100 text-red-700" :
                                 isPending ? "bg-gray-100 text-gray-500" :
                                 !isAvailable ? "bg-red-100 text-red-700" :
@@ -357,27 +467,57 @@ function TemplatesContent() {
                               <a href={`https://business.facebook.com/wa/manage/message-templates/?waba_id=${pn.wabaid}`} target="_blank" rel="noopener noreferrer" className="block text-[9px] opacity-70 hover:underline hover:opacity-100">
                                 {pn.displayNumber}
                               </a>
+                              {/* Re-sync just this one number's WABA (a single Meta call) —
+                                  isolates whether a number missing this template is a real
+                                  gap on Meta's side vs. an artifact of the full sync's
+                                  concurrent fan-out. Shown on hover to stay out of the way. */}
+                              {(selectedBiz?.provider || "meta") !== "aisensy" && (
+                                <button
+                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); syncOneNumber(pn.phoneNumberId); }}
+                                  disabled={syncingNumber === pn.phoneNumberId}
+                                  title={`Re-sync just ${pn.displayName} (${pn.displayNumber})`}
+                                  className="absolute -top-1.5 -right-1.5 hidden group-hover:flex items-center justify-center w-4 h-4 bg-white border border-gray-300 rounded-full shadow-sm text-gray-500 hover:text-primary-700 disabled:opacity-50"
+                                >
+                                  <RefreshCw className={`w-2.5 h-2.5 ${syncingNumber === pn.phoneNumberId ? "animate-spin" : ""}`} />
+                                </button>
+                              )}
                             </span>
                             );
                           })}
                         </div>
                       </div>
-                      {/* Copy button - only show if not on all numbers */}
-                      {tpl.availableOn.length < (selectedBiz?.phoneNumbers.length || 0) && (
-                        <button
-                          onClick={() => {
-                            setCopyTemplate(tpl);
-                            setSourceNumber(tpl.availableOn[0]);
-                            setTargetWabas([]);
-                            setCopyResults([]);
-                            setHeaderImageUrl("");
-                          }}
-                          className="flex items-center gap-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100"
-                        >
-                          <Copy className="w-3 h-3" />
-                          Copy to others
-                        </button>
-                      )}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {/* Re-sync just this one template — cheaper than the full "Sync from
+                            Meta" above when only one row looks stale. */}
+                        {(selectedBiz?.provider || "meta") !== "aisensy" && (
+                          <button
+                            onClick={() => syncOneTemplate(tpl.templateName)}
+                            disabled={syncingTemplate === tpl.templateName}
+                            title="Re-sync this template"
+                            className="flex items-center gap-1 px-2 py-1.5 text-xs text-gray-500 hover:text-primary-700 disabled:opacity-50"
+                          >
+                            <RefreshCw className={`w-3.5 h-3.5 ${syncingTemplate === tpl.templateName ? "animate-spin" : ""}`} />
+                          </button>
+                        )}
+                        {/* Copy button — shown if there's somewhere left to copy to: more
+                            numbers on this business, or another business entirely */}
+                        {(tpl.availableOn.length < (selectedBiz?.phoneNumbers.length || 0) || businesses.length > 1) && (
+                          <button
+                            onClick={() => {
+                              setCopyTemplate(tpl);
+                              setSourceNumber(tpl.availableOn[0]);
+                              setCopyTargetBusinessId(selectedBiz?.businessId || "");
+                              setTargetWabas([]);
+                              setCopyResults([]);
+                              setHeaderImageUrl("");
+                            }}
+                            className="flex items-center gap-1 px-3 py-1.5 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100"
+                          >
+                            <Copy className="w-3 h-3" />
+                            Copy to others
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -416,11 +556,36 @@ function TemplatesContent() {
                     )}
                   </div>
 
+                  {/* Target business — defaults to the current one (numbers within
+                      it), but can point at any other business in this account.
+                      Cross-business copy uses THAT business's own access token
+                      to create the template (see templates/copy.ts) since the
+                      source's token has no permission on a different Business
+                      Manager's WABA. */}
+                  {businesses.length > 1 && (
+                    <div className="mb-4">
+                      <label className="text-xs font-medium text-gray-600 mb-1 block">Copy to business:</label>
+                      <select
+                        value={copyTargetBusinessId}
+                        onChange={(e) => { setCopyTargetBusinessId(e.target.value); setTargetWabas([]); }}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      >
+                        {businesses.map((b) => (
+                          <option key={b.businessId} value={b.businessId}>
+                            {b.businessName}{b.businessId === selectedBiz?.businessId ? " (same business)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
                   {/* Targets */}
                   <div className="mb-4">
                     {(() => {
-                      const copyTargetNumbers = (selectedBiz?.phoneNumbers || []).filter(
-                        (pn) => !copyTemplate.availableOn.includes(pn.phoneNumberId)
+                      const copyTargetBiz = businesses.find((b) => b.businessId === copyTargetBusinessId) || selectedBiz;
+                      const isCrossBusiness = copyTargetBiz?.businessId !== selectedBiz?.businessId;
+                      const copyTargetNumbers = (copyTargetBiz?.phoneNumbers || []).filter(
+                        (pn) => isCrossBusiness || !copyTemplate.availableOn.includes(pn.phoneNumberId)
                       );
                       const copyTargetWabas = copyTargetNumbers.map((pn) => pn.wabaid || "").filter(Boolean);
                       const allChecked = copyTargetWabas.length > 0 && copyTargetWabas.every((w) => targetWabas.includes(w));
@@ -435,36 +600,48 @@ function TemplatesContent() {
                               {allChecked ? "Uncheck All" : "Check All"}
                             </button>
                           </div>
-                          <div className="space-y-2">
-                            {copyTargetNumbers.map((pn) => (
-                              <label key={pn.phoneNumberId} className="flex items-center gap-2 cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={targetWabas.includes(pn.wabaid || "")}
-                                  onChange={() => pn.wabaid && toggleTargetWaba(pn.wabaid)}
-                                  className="w-4 h-4 text-blue-600 rounded"
-                                />
-                                <span className="text-sm text-gray-700">{pn.displayName}</span>
-                                <span className="text-xs text-gray-400">({pn.displayNumber})</span>
-                              </label>
-                            ))}
-                          </div>
+                          {copyTargetNumbers.length === 0 ? (
+                            <p className="text-xs text-gray-400 py-2">
+                              {isCrossBusiness ? "This business has no numbers configured." : "Already on every number for this business."}
+                            </p>
+                          ) : (
+                            <div className="space-y-2 max-h-56 overflow-y-auto pr-1 border border-gray-100 rounded-lg p-2">
+                              {copyTargetNumbers.map((pn) => (
+                                <label key={pn.phoneNumberId} className="flex items-center gap-2 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={targetWabas.includes(pn.wabaid || "")}
+                                    onChange={() => pn.wabaid && toggleTargetWaba(pn.wabaid)}
+                                    className="w-4 h-4 text-blue-600 rounded"
+                                  />
+                                  <span className="text-sm text-gray-700">{pn.displayName}</span>
+                                  <span className="text-xs text-gray-400">({pn.displayNumber})</span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
                         </>
                       );
                     })()}
                   </div>
 
-                  {/* Image picker for image header templates */}
+                  {/* Image picker for image header templates — Meta rejects the
+                      submission with a bare "Invalid parameter" if an image-header
+                      template is copied with no example image, so this is enforced
+                      below rather than just labeled "required". */}
                   {copyTemplate.hasImageHeaderPerNumber && Object.values(copyTemplate.hasImageHeaderPerNumber).some(Boolean) && (
                     <div className="mb-4">
                       <label className="text-xs font-medium text-gray-600 mb-1 block">Header Image (required for this template):</label>
                       <ImagePicker value={headerImageUrl} onChange={setHeaderImageUrl} />
+                      {!headerImageUrl && (
+                        <p className="text-xs text-orange-600 mt-1">Pick a header image before submitting — Meta will reject this template without one.</p>
+                      )}
                     </div>
                   )}
 
                   {/* Results */}
                   {copyResults.length > 0 && (
-                    <div className="mb-4 space-y-1">
+                    <div className="mb-4 space-y-1 max-h-56 overflow-y-auto pr-1 border border-gray-100 rounded-lg p-2">
                       {copyResults.map((r, i) => (
                         <div key={i} className={`flex items-center gap-2 text-sm p-2 rounded ${
                           r.status === "submitted" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
@@ -486,7 +663,13 @@ function TemplatesContent() {
                     </button>
                     <button
                       onClick={handleCopy}
-                      disabled={targetWabas.length === 0 || copying}
+                      disabled={
+                        targetWabas.length === 0 ||
+                        copying ||
+                        (Boolean(copyTemplate.hasImageHeaderPerNumber) &&
+                          Object.values(copyTemplate.hasImageHeaderPerNumber || {}).some(Boolean) &&
+                          !headerImageUrl)
+                      }
                       className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg disabled:opacity-50 hover:bg-blue-700"
                     >
                       {copying ? "Submitting..." : `Submit to ${targetWabas.length} number${targetWabas.length !== 1 ? "s" : ""}`}
@@ -565,6 +748,28 @@ function TemplatesContent() {
                     />
                   </div>
 
+                  {newBodyParamNumbers.length > 0 && (
+                    <div className="mb-3">
+                      <label className="text-xs font-medium text-gray-600 mb-2 block">
+                        Example values — Meta requires a sample for each variable
+                      </label>
+                      <div className="space-y-2">
+                        {newBodyParamNumbers.map((n) => (
+                          <div key={n} className="flex items-center gap-3">
+                            <span className="text-xs text-gray-500 w-10">{`{{${n}}}`}</span>
+                            <input
+                              type="text"
+                              value={newBodyExamples[n] || ""}
+                              onChange={(e) => setNewBodyExamples((prev) => ({ ...prev, [n]: e.target.value }))}
+                              placeholder={`Example value for {{${n}}}`}
+                              className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="mb-4">
                     <label className="text-xs font-medium text-gray-600 mb-1 block">Footer text (optional)</label>
                     <input
@@ -573,6 +778,64 @@ function TemplatesContent() {
                       onChange={(e) => setNewFooter(e.target.value)}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                     />
+                  </div>
+
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-medium text-gray-600 block">Buttons (optional, up to 3)</label>
+                      {newButtons.length < 3 && (
+                        <button onClick={addNewButton} className="text-xs text-primary-600 hover:text-primary-700 font-medium flex items-center gap-0.5">
+                          <Plus className="w-3 h-3" /> Add button
+                        </button>
+                      )}
+                    </div>
+                    {newButtons.length > 0 && (
+                      <div className="space-y-2">
+                        {newButtons.map((btn, i) => (
+                          <div key={i} className="flex items-start gap-2 border border-gray-200 rounded-lg p-2">
+                            <select
+                              value={btn.type}
+                              onChange={(e) => updateNewButton(i, { type: e.target.value as "QUICK_REPLY" | "PHONE_NUMBER" | "URL" })}
+                              className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs shrink-0"
+                            >
+                              <option value="QUICK_REPLY">Quick Reply</option>
+                              <option value="URL">Website URL</option>
+                              <option value="PHONE_NUMBER">Call Phone</option>
+                            </select>
+                            <div className="flex-1 space-y-1.5">
+                              <input
+                                type="text"
+                                value={btn.text}
+                                onChange={(e) => updateNewButton(i, { text: e.target.value })}
+                                placeholder="Button text"
+                                className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs"
+                              />
+                              {btn.type === "URL" && (
+                                <input
+                                  type="text"
+                                  value={btn.url || ""}
+                                  onChange={(e) => updateNewButton(i, { url: e.target.value })}
+                                  placeholder="https://example.com"
+                                  className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs"
+                                />
+                              )}
+                              {btn.type === "PHONE_NUMBER" && (
+                                <input
+                                  type="text"
+                                  value={btn.phoneNumber || ""}
+                                  onChange={(e) => updateNewButton(i, { phoneNumber: e.target.value })}
+                                  placeholder="+91XXXXXXXXXX"
+                                  className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs"
+                                />
+                              )}
+                            </div>
+                            <button onClick={() => removeNewButton(i)} className="text-red-400 hover:text-red-600 shrink-0 mt-1.5">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div className="mb-4">
@@ -591,7 +854,7 @@ function TemplatesContent() {
                         {newTargets.length === selectedBiz.phoneNumbers.length ? "Uncheck All" : "Check All"}
                       </button>
                     </div>
-                    <div className="space-y-2">
+                    <div className="space-y-2 max-h-56 overflow-y-auto pr-1 border border-gray-100 rounded-lg p-2">
                       {selectedBiz.phoneNumbers.map((pn) => (
                         <label key={pn.phoneNumberId} className="flex items-center gap-2 cursor-pointer">
                           <input
@@ -682,8 +945,7 @@ function TemplatesContent() {
               </div>
             )}
           </div>
-        </main>
-      </div>
+      </AppShell>
     </AuthGuard>
   );
 }

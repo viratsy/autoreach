@@ -2,6 +2,7 @@ import { APIGatewayProxyHandler } from "aws-lambda";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { success, error, options } from "../../lib/response";
+import { getAuthEmail } from "../../lib/auth";
 
 const s3 = new S3Client({ requestChecksumCalculation: "WHEN_REQUIRED" });
 const BUCKET = process.env.CSV_BUCKET!;
@@ -13,6 +14,7 @@ const BUCKET = process.env.CSV_BUCKET!;
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
   if (event.httpMethod === "OPTIONS") return options(origin);
+  if (!getAuthEmail(event)) return error(401, "Unauthorized", origin);
 
   try {
     const { fileName } = JSON.parse(event.body || "{}");

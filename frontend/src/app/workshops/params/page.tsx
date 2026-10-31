@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Sidebar from "@/components/layout/Sidebar";
+import AppShell from "@/components/layout/AppShell";
 import AuthGuard from "@/components/layout/AuthGuard";
 import { apiRequest } from "@/lib/api";
 import { Save, Plus, Trash2, Info } from "lucide-react";
@@ -19,14 +19,14 @@ const DB_PARAMS = [
   { key: "zoom_link", description: "Zoom meeting link from batch details", example: "https://zoom.us/j/98809613024" },
   { key: "whatsapp_group", description: "WhatsApp group link from batch details", example: "https://chat.whatsapp.com/FByBaP..." },
   { key: "workshop_name", description: "Workshop name", example: "Generative AI Tools" },
-  { key: "workshop_date", description: "Workshop date", example: "2026-06-03" },
+  { key: "workshop_date", description: "Workshop date", example: "Wednesday, 03 June 2026" },
   { key: "workshop_time", description: "Workshop time", example: "07:00 PM IST" },
 ];
 
 const COMPUTED_PARAMS = [
   { key: "full_workshop_name", description: "3 Hours Live {workshop_name} Workshop", example: "3 Hours Live Generative AI Tools Workshop" },
   { key: "workshop_name_w", description: "{workshop_name} Workshop", example: "Generative AI Tools Workshop" },
-  { key: "workshop_date_time", description: "{workshop_date} at {workshop_time}", example: "2026-06-03 at 07:00 PM IST" },
+  { key: "workshop_date_time", description: "{workshop_date} at {workshop_time}", example: "Wednesday, 03 June 2026 at 07:00PM IST" },
   { key: "workshop_time_short", description: "Time without IST suffix", example: "07:00 PM" },
   { key: "mentor_name", description: "Static mentor name", example: "Hardik Raja (Your Mentor)" },
   { key: "w_type", description: "Always 'Workshop'", example: "Workshop" },
@@ -38,7 +38,7 @@ const COMPUTED_PARAMS = [
 
 
 export default function WorkshopParamsPage() {
-  const [wsCode, setWsCode] = useState("__DEFAULT__");
+  const [wsCode, setWsCode] = useState("");
   const [customParams, setCustomParams] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
@@ -84,9 +84,7 @@ export default function WorkshopParamsPage() {
 
   return (
     <AuthGuard>
-      <div className="flex h-screen">
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto p-6 bg-gray-50">
+      <AppShell mainClassName="flex-1 overflow-y-auto p-4 pt-20 md:p-6 bg-gray-50">
           <div className="max-w-4xl mx-auto">
             <div className="flex items-center justify-between mb-8">
               <div>
@@ -95,8 +93,7 @@ export default function WorkshopParamsPage() {
               </div>
               <div className="flex items-center gap-3">
                 <select value={wsCode} onChange={(e) => setWsCode(e.target.value)} className="bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm">
-                  <option value="__DEFAULT__">⚙️ Default</option>
-                  {registryWorkshops.map((ws) => <option key={ws.code} value={ws.code}>{ws.displayName || ws.code}</option>)}
+                                    {registryWorkshops.map((ws) => <option key={ws.code} value={ws.code}>{ws.displayName || ws.code}</option>)}
                 </select>
                 <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white rounded-xl text-sm font-medium disabled:opacity-50 hover:bg-primary-700 shadow-sm">
                   <Save className="w-4 h-4" />
@@ -187,8 +184,7 @@ export default function WorkshopParamsPage() {
           </div>
 
           {toast && <div className="fixed bottom-6 right-6 px-5 py-3 rounded-xl shadow-lg text-sm font-medium bg-gray-900 text-white z-50">{toast}</div>}
-        </main>
-      </div>
+      </AppShell>
     </AuthGuard>
   );
 }

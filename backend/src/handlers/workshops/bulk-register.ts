@@ -2,6 +2,7 @@ import { APIGatewayProxyHandler } from "aws-lambda";
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
+import { getAuthEmail } from "../../lib/auth";
 
 const REENGAGEMENT_TABLE = process.env.REENGAGEMENT_TABLE!;
 
@@ -42,6 +43,7 @@ function normalizePhone(phone: string): string {
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
   if (event.httpMethod === "OPTIONS") return options(origin);
+  if (!getAuthEmail(event)) return error(401, "Unauthorized", origin);
 
   try {
     const body = JSON.parse(event.body || "{}");

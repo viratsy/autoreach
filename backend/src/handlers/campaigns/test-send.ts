@@ -1,9 +1,10 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import { GetCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, TABLES } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
 import { getProvider } from "../../lib/providers";
 import { PhoneNumber } from "../../lib/types";
+import { getAuthEmail } from "../../lib/auth";
 
 /**
  * Send a test message from all selected numbers to a test phone number.
@@ -13,6 +14,7 @@ import { PhoneNumber } from "../../lib/types";
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
   if (event.httpMethod === "OPTIONS") return options(origin);
+  if (!getAuthEmail(event)) return error(401, "Unauthorized", origin);
 
   try {
     const {
@@ -81,13 +83,37 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       }
 
       try {
+        // Meta's message API needs the template's name + language to match
+        // EXACTLY (e.g. "en_US", not just "en") — look up the real approved
+        // language instead of assuming, since it's not the same for every
+        // template and a mismatch fails every number with error 132001
+        // ("Template name does not exist in the translation").
+        let templateLanguage = "en_US";
+        const testWabaid = bizNumbersById.get(number.phoneNumberId)?.wabaid;
+        if (testWabaid) {
+          try {
+            const tplRes = await fetch(
+              `https://graph.facebook.com/v25.0/${testWabaid}/message_templates?name=${encodeURIComponent(tplName)}&limit=25`,
+              { headers: { Authorization: `Bearer ${accessToken}` } }
+            );
+            const tplData = (await tplRes.json()) as { data?: { name: string; language?: string }[] };
+            // ?name= matches by prefix on Meta's side — take the exact one,
+            // or a same-prefixed sibling's language gets used and every send
+            // fails with 132001.
+            const tplMatch = (tplData.data || []).find((t) => t.name === tplName);
+            if (tplMatch?.language) templateLanguage = tplMatch.language;
+          } catch (err) {
+            console.warn(`Language lookup failed for ${number.phoneNumberId}, defaulting to en_US:`, err);
+          }
+        }
+
         const requestBody = {
           messaging_product: "whatsapp",
           to: testPhone,
           type: "template",
           template: {
             name: tplName,
-            language: { code: "en" },
+            language: { code: templateLanguage },
             components: buildTemplateComponents(
               parameterValues,
               // Only include image for numbers that need it
@@ -115,12 +141,43 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         console.log(`Response from ${number.phoneNumberId}:`, JSON.stringify(data));
 
         if (response.ok && data.messages?.[0]) {
+          const messageId = data.messages[0].id;
           results.push({
             phoneNumberId: number.phoneNumberId,
             displayName: number.displayName,
             status: "sent",
-            messageId: data.messages[0].id,
+            messageId,
           });
+
+          // Meta's response here only confirms the message was ACCEPTED, not
+          // delivered — things like a payment/billing issue are often only
+          // reported a few seconds later via the async status webhook. Write a
+          // trackable record (matching webhook-worker.ts's GSI1PK lookup) so
+          // test-send-status.ts can report a failure the wizard would otherwise
+          // never learn about.
+          try {
+            await docClient.send(
+              new PutCommand({
+                TableName: TABLES.MESSAGES,
+                Item: {
+                  PK: `TESTSEND#${messageId}`,
+                  SK: "METADATA",
+                  GSI1PK: `METAMSG#${messageId}`,
+                  GSI1SK: "TESTSEND",
+                  phoneNumber: testPhone,
+                  sendingNumberId: number.phoneNumberId,
+                  metaMessageId: messageId,
+                  status: "sent",
+                  repliedAt: null,
+                  errorCode: null,
+                  sentAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                },
+              })
+            );
+          } catch (trackErr) {
+            console.warn("Failed to write test-send tracking record (non-fatal):", trackErr);
+          }
         } else {
           results.push({
             phoneNumberId: number.phoneNumberId,

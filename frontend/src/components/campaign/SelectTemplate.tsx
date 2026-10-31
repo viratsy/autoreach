@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CampaignDraft } from "@/app/campaigns/new/page";
+import { CampaignDraft, ExtraCampaign } from "@/app/campaigns/new/page";
 import { apiRequest } from "@/lib/api";
-import { AlertTriangle, RefreshCw, Search, ExternalLink } from "lucide-react";
+import { AlertTriangle, RefreshCw, Search, ExternalLink, Eye } from "lucide-react";
+import { TemplateComponent } from "@/types";
+import TemplatePreview from "./TemplatePreview";
 
 interface Props {
   draft: CampaignDraft;
@@ -16,7 +18,7 @@ interface TemplateInfo {
   templateName: string;
   category: string;
   parameterCount: number;
-  components: { type: string; text?: string }[];
+  components: TemplateComponent[];
   availableOn: string[];
   categoryPerNumber?: Record<string, string>;
   paramCountPerNumber?: Record<string, number>;
@@ -35,6 +37,13 @@ export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Prop
   const [manualName, setManualName] = useState("");
   const [manualParamCount, setManualParamCount] = useState("0");
   const [addingManual, setAddingManual] = useState(false);
+  const [previewingTemplate, setPreviewingTemplate] = useState<string | null>(null);
+
+  const getSampleValues = (paramCount: number): Record<string, string> => {
+    const values: Record<string, string> = {};
+    for (let i = 1; i <= paramCount; i++) values[String(i)] = `Sample Value ${i}`;
+    return values;
+  };
 
   const provider = draft.business?.provider || "meta";
   const selectedNumberIds = draft.selectedNumbers.map((n) => n.phoneNumberId);
@@ -134,7 +143,7 @@ export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Prop
         templateName: tpl.templateName,
         language: "en",
         category: tpl.category,
-        components: tpl.components as unknown as import("@/types").TemplateComponent[],
+        components: tpl.components,
         parameterCount: tpl.parameterCount,
         status: "approved",
         lastSyncedAt: "",
@@ -142,6 +151,69 @@ export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Prop
       templateMappings: {},
       numbersWithImageHeader: imageNumbers,
     });
+  };
+
+  const toExtra = (tpl: TemplateInfo): ExtraCampaign => ({
+    template: {
+      templateName: tpl.templateName,
+      language: "en",
+      category: tpl.category,
+      components: tpl.components,
+      parameterCount: tpl.parameterCount,
+      status: "approved",
+      lastSyncedAt: "",
+    },
+    parameterMapping: {},
+    msg: "",
+    scheduleDate: "",
+    scheduleTime: "",
+    emailEnabled: false,
+    emailTemplateId: "",
+    headerImageUrl: "",
+    numbersWithImageHeader: selectedNumberIds.filter(
+      (id) => tpl.hasImageHeaderPerNumber?.[id] === true
+    ),
+  });
+
+  const isSelected = (name: string) =>
+    draft.template?.templateName === name ||
+    draft.extraCampaigns.some((c) => c.template.templateName === name);
+
+  /**
+   * Removing the primary promotes the first extra in its place, so the wizard
+   * never ends up with extras but no primary to walk through.
+   */
+  const toggleTemplate = (tpl: TemplateInfo) => {
+    const name = tpl.templateName;
+
+    if (draft.template?.templateName === name) {
+      const [promoted, ...rest] = draft.extraCampaigns;
+      onUpdate(
+        promoted
+          ? {
+              template: promoted.template,
+              parameterMapping: promoted.parameterMapping,
+              numbersWithImageHeader: promoted.numbersWithImageHeader,
+              templateMappings: {},
+              extraCampaigns: rest,
+            }
+          : { template: null, parameterMapping: {}, templateMappings: {}, numbersWithImageHeader: [] }
+      );
+      return;
+    }
+
+    if (draft.extraCampaigns.some((c) => c.template.templateName === name)) {
+      onUpdate({
+        extraCampaigns: draft.extraCampaigns.filter((c) => c.template.templateName !== name),
+      });
+      return;
+    }
+
+    if (!draft.template) {
+      handleSelect(tpl);
+      return;
+    }
+    onUpdate({ extraCampaigns: [...draft.extraCampaigns, toExtra(tpl)] });
   };
 
   const handleMapping = (phoneNumberId: string, altTemplateName: string) => {
@@ -289,20 +361,52 @@ export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Prop
             <p className="text-gray-400 text-sm text-center py-4">No templates match &quot;{search}&quot;</p>
           ) : (
             filteredTemplates.map((tpl) => (
-              <button
+              <div
                 key={tpl.templateName}
-                onClick={() => handleSelect(tpl)}
-                className={`w-full text-left p-4 rounded-lg border transition-colors ${
-                  draft.template?.templateName === tpl.templateName
+                role="button"
+                tabIndex={0}
+                onClick={() => toggleTemplate(tpl)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") toggleTemplate(tpl);
+                }}
+                className={`w-full text-left p-4 rounded-lg border transition-colors cursor-pointer ${
+                  isSelected(tpl.templateName)
                     ? "border-primary-500 bg-primary-50"
                     : "border-gray-200 hover:border-gray-300"
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <p className="font-medium text-gray-900 text-sm">{tpl.templateName}</p>
-                  <span className={`text-xs px-2 py-0.5 rounded font-medium ${getCategoryBadge(tpl.category)}`}>
-                    {tpl.category}
-                  </span>
+                  <p className="font-medium text-gray-900 text-sm flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      readOnly
+                      checked={isSelected(tpl.templateName)}
+                      className="w-4 h-4 accent-primary-600 pointer-events-none"
+                      aria-label={`Select ${tpl.templateName}`}
+                    />
+                    {tpl.templateName}
+                    {draft.template?.templateName === tpl.templateName && draft.extraCampaigns.length > 0 && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary-100 text-primary-700">
+                        1st
+                      </span>
+                    )}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs px-2 py-0.5 rounded font-medium ${getCategoryBadge(tpl.category)}`}>
+                      {tpl.category}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPreviewingTemplate((prev) => (prev === tpl.templateName ? null : tpl.templateName));
+                      }}
+                      className="text-gray-400 hover:text-gray-600 p-0.5"
+                      title="Preview template"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
                   {tpl.parameterCount} parameters • Available on {tpl.availableOn.length}/{selectedNumberIds.length} numbers
@@ -339,7 +443,16 @@ export default function SelectTemplate({ draft, onUpdate, onNext, onBack }: Prop
                     );
                   })}
                 </div>
-              </button>
+
+                {previewingTemplate === tpl.templateName && (
+                  <div className="mt-3" onClick={(e) => e.stopPropagation()}>
+                    <TemplatePreview
+                      template={{ components: tpl.components }}
+                      resolvedValues={getSampleValues(tpl.parameterCount)}
+                    />
+                  </div>
+                )}
+              </div>
             ))
           )}
         </div>

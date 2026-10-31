@@ -3,6 +3,8 @@ import { GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { SchedulerClient, DeleteScheduleCommand, CreateScheduleCommand } from "@aws-sdk/client-scheduler";
 import { docClient, TABLES } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
+import { getAuthEmail } from "../../lib/auth";
+import { buildScheduleName } from "../../lib/campaign-factory";
 
 const scheduler = new SchedulerClient({});
 const SCHEDULER_GROUP = process.env.SCHEDULER_GROUP || "default";
@@ -17,6 +19,7 @@ const SCHEDULER_ROLE_ARN = process.env.SCHEDULER_ROLE_ARN!;
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
   if (event.httpMethod === "OPTIONS") return options(origin);
+  if (!getAuthEmail(event)) return error(401, "Unauthorized", origin);
 
   try {
     const campaignId = event.pathParameters?.campaignId;
@@ -42,7 +45,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     try {
       await scheduler.send(
         new DeleteScheduleCommand({
-          Name: `autoreach-${campaignId}`,
+          Name: buildScheduleName(campaignId),
           GroupName: SCHEDULER_GROUP,
         })
       );
@@ -54,7 +57,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     const scheduleExpression = `at(${istDateTime.toISOString().replace(".000Z", "")})`;
     await scheduler.send(
       new CreateScheduleCommand({
-        Name: `autoreach-${campaignId}`,
+        Name: buildScheduleName(campaignId),
         GroupName: SCHEDULER_GROUP,
         ScheduleExpression: scheduleExpression,
         ScheduleExpressionTimezone: "UTC",

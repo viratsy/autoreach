@@ -1,6 +1,8 @@
 import { Handler } from "aws-lambda";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, QueryCommand, UpdateCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
+import { getAvailableNumbers, filterNumbersWithImageHeader, deriveTimeLabels, buildContactParams } from "../../lib/reengagement-contacts";
+import { chunkForSQSBatch } from "../../lib/sqs-batching";
 
 const client = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client, { marshallOptions: { removeUndefinedValues: true } });
@@ -8,6 +10,7 @@ const docClient = DynamoDBDocumentClient.from(client, { marshallOptions: { remov
 const REENGAGEMENT_TABLE = process.env.REENGAGEMENT_TABLE!;
 const MASTERCLASS_TABLE = process.env.MASTERCLASS_TABLE || "masterclass_lookup_key";
 const WORKSHOP_DB_TABLE = process.env.WORKSHOP_DB_TABLE || "WhatsAppDatabase";
+const MENTOR_NAME = process.env.MENTOR_NAME || "Hardik Raja";
 const SEND_QUEUE_URL = process.env.SEND_QUEUE_URL!;
 
 /**
@@ -151,18 +154,6 @@ async function processActiveContacts(today: string) {
     );
     const wsConfig = configResult.Item;
 
-    // Load default config for fallback params
-    let defaultWsConfig: Record<string, unknown> | null = null;
-    if (wsConfig) {
-      const defaultResult = await docClient.send(
-        new GetCommand({
-          TableName: process.env.WORKSHOP_CONFIG_TABLE || "autoreach-workshop-config-hardik",
-          Key: { PK: "WSCONFIG#__DEFAULT__", SK: "CYCLE#0" },
-        })
-      );
-      defaultWsConfig = defaultResult.Item || null;
-    }
-
     if (!wsConfig || !wsConfig.runKeys || Object.keys(wsConfig.runKeys).length === 0) {
       console.log(`No config found for ${wsCode} cycle ${cycle}, skipping campaign creation`);
     } else {
@@ -181,14 +172,37 @@ async function processActiveContacts(today: string) {
         const { SQSClient, SendMessageBatchCommand } = await import("@aws-sdk/client-sqs");
         const sqs = new SQSClient({});
 
-        for (const [runKey, runKeyConfig] of Object.entries(wsConfig.runKeys as Record<string, { numbers: Record<string, { templateName: string; bodyParams: string[]; headerImageUrl?: string }> }>)) {
-          const numbers = Object.keys(runKeyConfig.numbers || {});
-          if (numbers.length === 0) continue;
+        // Sending pool for this workshop — one shared template+params per run
+        // key now (not per number, see workshop config redesign), so the
+        // per-number nuance that actually matters is just "does this number
+        // have that template approved yet", checked against the templates
+        // table exactly like campaign creation's SelectTemplate does.
+        const sendingPool = Object.keys(wsConfig.numbers || {});
+
+        for (const [runKey, runKeyConfig] of Object.entries(wsConfig.runKeys as Record<string, { templateName: string; bodyParams: string[]; headerImageUrl?: string }>)) {
+          if (!runKeyConfig?.templateName || sendingPool.length === 0) continue;
+
+          const numbers = await getAvailableNumbers(wsConfig.businessId as string, sendingPool, runKeyConfig.templateName);
+          if (numbers.length === 0) {
+            console.log(`No numbers have template ${runKeyConfig.templateName} approved for run key ${runKey}, skipping`);
+            continue;
+          }
+
+          // See filterNumbersWithImageHeader — a number whose approved copy has
+          // no header slot must not be sent a header image, or Meta rejects
+          // every message to it.
+          const imageHeaderNumbers = runKeyConfig.headerImageUrl
+            ? await filterNumbersWithImageHeader(wsConfig.businessId as string, runKeyConfig.templateName, numbers)
+            : [];
+
+          // Every run key carries its own bodyParams now — the inherited ones
+          // were written onto each config when WSCONFIG#__DEFAULT__ was retired.
+          const bodyParams = runKeyConfig.bodyParams || [];
 
           // Build contacts with resolved params
-          const contactBatches: { contacts: { phone: string; name: string; [key: string]: string }[]; phoneNumberId: string; templateName: string; bodyParams: string[]; headerImageUrl: string }[] = [];
+          const contactBatches: { contacts: Record<string, string>[]; phoneNumberId: string }[] = [];
 
-          // Distribute contacts round-robin across numbers
+          // Distribute contacts round-robin across the available numbers
           const perNumber: Record<string, typeof counterContacts> = {};
           counterContacts.forEach((contact, i) => {
             const numId = numbers[i % numbers.length];
@@ -197,74 +211,51 @@ async function processActiveContacts(today: string) {
           });
 
           for (const [numId, numContacts] of Object.entries(perNumber)) {
-            const numConfig = runKeyConfig.numbers[numId];
-            if (!numConfig?.templateName) continue;
-
+            const wsDate = batchDetails.Date || "";
+            const labels = deriveTimeLabels(wsDate);
             contactBatches.push({
-              contacts: numContacts.map((c) => {
-                const wsDate = batchDetails.Date || "";
-                const wsTime = wsDate.includes("07:00") ? "07:00 PM IST" : "11:00 AM IST";
-                const wsTimeShort = wsDate.includes("07:00") ? "7 PM" : "11 AM";
-                const endTime = wsDate.includes("07:00") ? "10:00 PM" : "2:00 PM";
-                return {
-                  phone: c.phone,
-                  name: c.name,
-                  email: c.email,
-                  workshop_name: workshopName,
-                  workshop_date: wsDate,
-                  workshop_time: wsTime,
-                  zoom_link: batchDetails.ZoomLink || "",
-                  whatsapp_group: batchDetails.WhatsappLink || "",
-                  // Computed params
-                  full_workshop_name: `3 Hours Live ${workshopName} Workshop`,
-                  workshop_name_w: `${workshopName} Workshop`,
-                  workshop_date_time: `${wsDate} at ${wsTime}`,
-                  workshop_time_short: wsTimeShort,
-                  mentor_name: "Hardik Raja (Your Mentor)",
-                  w_type: "Workshop",
-                  w_name: workshopName,
-                  w_date: formatDateHuman(wsDate),
-                  three_hours_text: `3 hours live ${workshopName}`,
-                  duration: `${wsTimeShort} to ${endTime} IST`,
-                };
-              }),
+              contacts: numContacts.map((c) =>
+                buildContactParams(
+                  { phone: c.phone, name: c.name, email: c.email },
+                  workshopName,
+                  wsDate,
+                  labels,
+                  batchDetails.ZoomLink || "",
+                  batchDetails.WhatsappLink || "",
+                  MENTOR_NAME
+                )
+              ),
               phoneNumberId: numId,
-              templateName: numConfig.templateName,
-              bodyParams: (numConfig.bodyParams && numConfig.bodyParams.length > 0)
-                ? numConfig.bodyParams
-                : getDefaultParams(defaultWsConfig, runKey),
-              headerImageUrl: numConfig.headerImageUrl || "",
             });
           }
 
-          // Push to SQS for sending
-          for (let i = 0; i < contactBatches.length; i += 10) {
-            const chunk = contactBatches.slice(i, i + 10);
-            await sqs.send(
-              new SendMessageBatchCommand({
-                QueueUrl: SEND_QUEUE_URL,
-                Entries: chunk.map((batch, idx) => ({
-                  Id: `ws-${wsCode}-${runKey}-${i + idx}`,
-                  MessageBody: JSON.stringify({
-                    campaignId: `ws_${wsCode}_${today}_${runKey}`,
-                    templateName: batch.templateName,
-                    templateMappings: {},
-                    parameterMapping: Object.fromEntries(batch.bodyParams.map((p, pi) => [String(pi + 1), p.startsWith("__CUSTOM__") ? `__STATIC__${wsConfig.customParams?.[p.replace("__CUSTOM__", "")] || ""}` : p])),
-                    headerImageUrl: batch.headerImageUrl,
-                    numbersWithImageHeader: batch.headerImageUrl ? [batch.phoneNumberId] : [],
-                    accessToken,
-                    batch: {
-                      contacts: batch.contacts,
-                      phoneNumberId: batch.phoneNumberId,
-                      displayName: wsConfig.numbers?.[batch.phoneNumberId]?.displayName || "",
-                    },
-                  }),
-                })),
-              })
-            );
+          // Push to SQS for sending. Chunked via chunkForSQSBatch, not just
+          // by count of 10 — a SendMessageBatch call also caps out at
+          // 1,048,576 total bytes, which count-only chunking can silently
+          // exceed once contact batches carry enough per-contact params
+          // (confirmed in production on the equivalent path in send.ts).
+          const sqsEntries = contactBatches.map((batch, idx) => ({
+            Id: `ws-${wsCode}-${runKey}-${idx}`,
+            MessageBody: JSON.stringify({
+              campaignId: `ws_${wsCode}_${today}_${runKey}`,
+              templateName: runKeyConfig.templateName,
+              templateMappings: {},
+              parameterMapping: Object.fromEntries(bodyParams.map((p, pi) => [String(pi + 1), p.startsWith("__CUSTOM__") ? `__STATIC__${wsConfig.customParams?.[p.replace("__CUSTOM__", "")] || ""}` : p])),
+              headerImageUrl: runKeyConfig.headerImageUrl || "",
+              numbersWithImageHeader: imageHeaderNumbers.includes(batch.phoneNumberId) ? [batch.phoneNumberId] : [],
+              accessToken,
+              batch: {
+                contacts: batch.contacts,
+                phoneNumberId: batch.phoneNumberId,
+                displayName: wsConfig.numbers?.[batch.phoneNumberId]?.displayName || "",
+              },
+            }),
+          }));
+          for (const chunk of chunkForSQSBatch(sqsEntries, (e) => Buffer.byteLength(e.MessageBody, "utf8"))) {
+            await sqs.send(new SendMessageBatchCommand({ QueueUrl: SEND_QUEUE_URL, Entries: chunk }));
           }
 
-          console.log(`Queued ${runKey} for ${counterContacts.length} contacts across ${numbers.length} numbers`);
+          console.log(`Queued ${runKey} for ${counterContacts.length} contacts across ${numbers.length}/${sendingPool.length} numbers (template: ${runKeyConfig.templateName})`);
         }
       }
     }
@@ -317,12 +308,16 @@ async function getWorkshopBatchDetails(workshopName: string) {
 }
 
 async function checkMasterclass(phone: string, email: string): Promise<boolean> {
-  // Check by phone
+  // The table's actual partition key attribute is "pk" (confirmed against real
+  // rows: {pk: "PHONE#91...", type: "phone", ...} / {pk: "EMAIL#...", type: "email", ...}) —
+  // NOT "masterclass_lookup_key". A GetItem keyed on the wrong attribute name
+  // throws ValidationException, which the empty catch below swallows, so this
+  // previously returned "not paid" unconditionally for every single call.
   try {
     const phoneResult = await docClient.send(
       new GetCommand({
         TableName: MASTERCLASS_TABLE,
-        Key: { masterclass_lookup_key: `PHONE#${phone}` },
+        Key: { pk: `PHONE#${phone}` },
       })
     );
     if (phoneResult.Item) return true;
@@ -334,7 +329,7 @@ async function checkMasterclass(phone: string, email: string): Promise<boolean> 
       const emailResult = await docClient.send(
         new GetCommand({
           TableName: MASTERCLASS_TABLE,
-          Key: { masterclass_lookup_key: `EMAIL#${email}` },
+          Key: { pk: `EMAIL#${email}` },
         })
       );
       if (emailResult.Item) return true;
@@ -344,26 +339,3 @@ async function checkMasterclass(phone: string, email: string): Promise<boolean> 
   return false;
 }
 
-function formatDateHuman(dateStr: string): string {
-  // Convert "2026-06-05" or similar to "5th June"
-  try {
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return dateStr;
-    const day = d.getDate();
-    const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-    const suffix = day === 1 || day === 21 || day === 31 ? "st" : day === 2 || day === 22 ? "nd" : day === 3 || day === 23 ? "rd" : "th";
-    return `${day}${suffix} ${months[d.getMonth()]}`;
-  } catch {
-    return dateStr;
-  }
-}
-
-function getDefaultParams(defaultConfig: Record<string, unknown> | null, runKey: string): string[] {
-  if (!defaultConfig?.runKeys) return [];
-  const runKeys = defaultConfig.runKeys as Record<string, { numbers: Record<string, { bodyParams?: string[] }> }>;
-  const runKeyConfig = runKeys[runKey];
-  if (!runKeyConfig?.numbers) return [];
-  // Get params from any number in the default (they're all the same)
-  const firstNumId = Object.keys(runKeyConfig.numbers)[0];
-  return firstNumId ? (runKeyConfig.numbers[firstNumId].bodyParams || []) : [];
-}

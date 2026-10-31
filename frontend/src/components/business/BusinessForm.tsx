@@ -103,8 +103,10 @@ export default function BusinessForm({ business }: Props) {
             className="w-full text-sm border border-gray-300 rounded px-3 py-2 disabled:bg-gray-50 disabled:text-gray-400"
           >
             <option value="meta">Meta (WhatsApp Cloud API)</option>
-            <option value="aisensy">AiSensy</option>
-            <option value="wati">WATI</option>
+            {/* AiSensy/WATI are only selectable when editing a business that's already on that
+                provider — hidden for new businesses per current policy (Meta-only for now). */}
+            {provider === "aisensy" && <option value="aisensy">AiSensy</option>}
+            {provider === "wati" && <option value="wati">WATI</option>}
           </select>
           {isEdit && <p className="text-xs text-gray-400 mt-1">Provider can&apos;t be changed after creation.</p>}
         </div>

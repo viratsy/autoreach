@@ -2,6 +2,7 @@ import { APIGatewayProxyHandler } from "aws-lambda";
 import { PutCommand, ScanCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
+import { getAuthEmail } from "../../lib/auth";
 
 const REGISTRY_TABLE = process.env.WORKSHOP_REGISTRY_TABLE || "autoreach-workshop-registry-hardik";
 
@@ -14,6 +15,7 @@ const REGISTRY_TABLE = process.env.WORKSHOP_REGISTRY_TABLE || "autoreach-worksho
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
   if (event.httpMethod === "OPTIONS") return options(origin);
+  if (!getAuthEmail(event)) return error(401, "Unauthorized", origin);
 
   if (event.httpMethod === "GET") {
     try {
@@ -28,7 +30,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   if (event.httpMethod === "PUT") {
     try {
       const body = JSON.parse(event.body || "{}");
-      const { code, displayName, aliases, time, runKeys, mentorName } = body;
+      const { code, displayName, aliases, time, runKeys, mentorName, whatsappDbName } = body;
 
       if (!code) return error(400, "code is required", origin);
 
@@ -41,6 +43,11 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         time: time || "7pm",
         runKeys: runKeys || [],
         mentorName: mentorName || "",
+        // The WhatsAppDatabase row's Name key to resolve batches from —
+        // defaults to displayName. Only needs to differ when two
+        // time-variant workshop codes (e.g. "...7 PM"/"...11AM") share one
+        // WhatsAppDatabase row under a common base name.
+        whatsappDbName: whatsappDbName || displayName || code,
         updatedAt: new Date().toISOString(),
       };
 

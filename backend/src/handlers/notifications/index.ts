@@ -2,6 +2,7 @@ import { APIGatewayProxyHandler } from "aws-lambda";
 import { UpdateCommand, QueryCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, TABLES } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
+import { getAuthEmail } from "../../lib/auth";
 
 const NOTIFICATIONS_TABLE = process.env.NOTIFICATIONS_TABLE || "autoreach-notifications-hardik";
 
@@ -9,7 +10,7 @@ export interface Notification {
   PK: string; // NOTIF#<id>
   SK: string; // DEDUP#<type>#<businessId>#<phoneNumberId>#<templateName>#<errorMessage> — stable per distinct issue
   id: string;
-  type: "template_marketing" | "send_failed" | "quality_issue" | "payment_issue" | "campaign_stuck";
+  type: "template_marketing" | "send_failed" | "quality_issue" | "payment_issue" | "campaign_stuck" | "retry_campaign_created" | "number_removed";
   businessId: string;
   businessName: string;
   phoneNumberId: string;
@@ -32,6 +33,7 @@ export interface Notification {
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
   if (event.httpMethod === "OPTIONS") return options(origin);
+  if (!getAuthEmail(event)) return error(401, "Unauthorized", origin);
 
   if (event.httpMethod === "GET") {
     try {
@@ -91,6 +93,11 @@ export async function createNotification(data: {
 }) {
   const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const now = new Date().toISOString();
+  // 90 days out, refreshed on every occurrence so a recurring issue doesn't expire
+  // while still actively happening. Table-level TTL isn't enabled yet — see
+  // scripts/enable-notifications-ttl.sh — but writing this attribute now is
+  // harmless either way and means enabling TTL later needs no backfill.
+  const ttl = Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60;
   const appealLink = `https://business.facebook.com/wa/manage/message-templates/?waba_id=&business_id=${data.businessId}`;
   const businessManagerLink = `https://business.facebook.com/settings/whatsapp-business-accounts/?business_id=${data.businessId}`;
 
@@ -110,11 +117,21 @@ export async function createNotification(data: {
         "SET id = if_not_exists(id, :id), #type = :type, businessId = :bid, businessName = :bname, " +
         "phoneNumberId = :pnid, phoneDisplayName = :pdname, templateName = :tpl, errorMessage = :err, " +
         "campaignId = :camp, appealLink = :appeal, businessManagerLink = :bmlink, " +
-        "createdAt = if_not_exists(createdAt, :now), lastSeenAt = :now, resolved = :false " +
+        "createdAt = if_not_exists(createdAt, :now), lastSeenAt = :now, resolved = :false, #ttl = :ttl " +
         "ADD occurrenceCount :one",
-      ExpressionAttributeNames: { "#type": "type" },
+      // "ttl" and "type" are both DynamoDB reserved words in expression
+      // syntax — must be aliased or the whole UpdateCommand throws
+      // ValidationException. ttl was unaliased here (added later, for a
+      // not-yet-enabled table TTL — see the ttl comment above), so every
+      // createNotification call since has been silently failing: every
+      // caller wraps this in a try/catch specifically so a notification
+      // failure never masks the real error it's reporting on, which also
+      // meant this had no visible symptom besides new notifications quietly
+      // never landing. Confirmed live against a real table.
+      ExpressionAttributeNames: { "#type": "type", "#ttl": "ttl" },
       ExpressionAttributeValues: {
         ":id": id,
+        ":ttl": ttl,
         ":type": data.type,
         ":bid": data.businessId,
         ":bname": data.businessName,

@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import Sidebar from "@/components/layout/Sidebar";
+import AppShell from "@/components/layout/AppShell";
 import AuthGuard from "@/components/layout/AuthGuard";
 import BusinessForm from "@/components/business/BusinessForm";
 import AddNumberToBusiness from "@/components/business/AddNumberToBusiness";
@@ -28,9 +28,7 @@ function BusinessFormPage() {
 
   return (
     <AuthGuard>
-      <div className="flex h-screen">
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto p-6">
+      <AppShell>
           <h2 className="text-2xl font-bold text-gray-900 mb-6">
             {isEdit ? "Edit Business" : "Add Business"}
           </h2>
@@ -65,8 +63,7 @@ function BusinessFormPage() {
           ) : (
             <BusinessForm />
           )}
-        </main>
-      </div>
+      </AppShell>
     </AuthGuard>
   );
 }

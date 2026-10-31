@@ -9,7 +9,7 @@ import { PhoneNumber } from "../../lib/types";
  * Create a brand-new WhatsApp template on Meta and submit it for approval on
  * the given numbers' WABAs.
  * POST /templates/create
- * { businessId, templateName, category, language, bodyText, headerText?, headerImageUrl?, footerText?, targetPhoneNumberIds }
+ * { businessId, templateName, category, language, bodyText, headerText?, headerImageUrl?, footerText?, buttons?, targetPhoneNumberIds }
  */
 export const handler: APIGatewayProxyHandler = async (event) => {
   const origin = event.headers?.origin || event.headers?.Origin;
@@ -23,9 +23,11 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       category,
       language,
       bodyText,
+      bodyExamples,
       headerText,
       headerImageUrl,
       footerText,
+      buttons,
       targetPhoneNumberIds,
     } = JSON.parse(event.body || "{}") as {
       businessId?: string;
@@ -33,9 +35,11 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       category?: string;
       language?: string;
       bodyText?: string;
+      bodyExamples?: string[];
       headerText?: string;
       headerImageUrl?: string;
       footerText?: string;
+      buttons?: { type: "QUICK_REPLY" | "PHONE_NUMBER" | "URL"; text: string; phoneNumber?: string; url?: string }[];
       targetPhoneNumberIds?: string[];
     };
 
@@ -60,9 +64,11 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     const paramCount = (bodyText.match(/\{\{\d+\}\}/g) || []).length;
     const bodyComponent: Record<string, unknown> = { type: "BODY", text: bodyText };
     if (paramCount > 0) {
-      bodyComponent.example = {
-        body_text: [Array.from({ length: paramCount }, (_, i) => `Example${i + 1}`)],
-      };
+      const examples = Array.from(
+        { length: paramCount },
+        (_, i) => bodyExamples?.[i]?.trim() || `Example${i + 1}`
+      );
+      bodyComponent.example = { body_text: [examples] };
     }
 
     const components: Record<string, unknown>[] = [];
@@ -80,6 +86,29 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
     if (footerText) {
       components.push({ type: "FOOTER", text: footerText });
+    }
+
+    // Meta rejects a BUTTONS component with an empty buttons array, so only
+    // add it when at least one button actually has text — a URL button with
+    // no url or a PHONE_NUMBER button with no number is dropped rather than
+    // submitted broken, since the frontend already gates on those fields.
+    const validButtons = (buttons || []).filter((b) => {
+      if (!b.text?.trim()) return false;
+      if (b.type === "URL") return Boolean(b.url?.trim());
+      if (b.type === "PHONE_NUMBER") return Boolean(b.phoneNumber?.trim());
+      return true;
+    });
+    if (validButtons.length > 0) {
+      components.push({
+        type: "BUTTONS",
+        buttons: validButtons.map((b) =>
+          b.type === "URL"
+            ? { type: "URL", text: b.text.trim(), url: b.url!.trim() }
+            : b.type === "PHONE_NUMBER"
+            ? { type: "PHONE_NUMBER", text: b.text.trim(), phone_number: b.phoneNumber!.trim() }
+            : { type: "QUICK_REPLY", text: b.text.trim() }
+        ),
+      });
     }
 
     const results: { phoneNumberId: string; displayName: string; status: string; error?: string }[] = [];

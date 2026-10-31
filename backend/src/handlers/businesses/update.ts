@@ -4,6 +4,7 @@ import { docClient, TABLES } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
 import { PhoneNumber, Provider } from "../../lib/types";
 import { getAuthEmail } from "../../lib/auth";
+import { upsertPhoneNumberLookups, removePhoneNumberLookups } from "../../lib/phone-lookup";
 
 /**
  * Update an existing business (rename, change provider config, edit numbers).
@@ -48,6 +49,16 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         wabaid: pn.wabaid || prev?.wabaid,
         apiKey: pn.apiKey || prev?.apiKey,
         endpoint: pn.endpoint || prev?.endpoint,
+        // The edit form doesn't collect these — without preserving them here, any
+        // edit (even just renaming the business) would silently wipe the cached
+        // quality-check data for every number.
+        qualityRating: pn.qualityRating || prev?.qualityRating,
+        // Meta's API doesn't reliably return the real 24h tier (confirmed —
+        // quality-check.ts's fetch comes back empty), so a genuinely new number
+        // (no prior record) defaults to TIER_100K as a placeholder rather than
+        // showing an overly-conservative capacity warning. Update manually if a
+        // number's real tier is ever known to be lower.
+        messagingLimit: pn.messagingLimit || prev?.messagingLimit || "TIER_100K",
       };
     });
 
@@ -92,6 +103,13 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         },
       })
     );
+
+    // Keep the phone-number lookup table in sync: drop numbers that were removed,
+    // upsert the current set (covers both new numbers and re-saves of existing ones).
+    const newNumberIds = new Set(phoneNumbers.map((pn) => pn.phoneNumberId));
+    const removedNumberIds = [...existingNumbers.keys()].filter((id) => !newNumberIds.has(id));
+    await removePhoneNumberLookups(removedNumberIds);
+    await upsertPhoneNumberLookups(businessId, phoneNumbers.map((pn) => pn.phoneNumberId));
 
     return success({ businessId }, origin);
   } catch (err) {
