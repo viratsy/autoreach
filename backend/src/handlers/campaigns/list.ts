@@ -1,5 +1,5 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import { QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { BatchGetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, TABLES } from "../../lib/dynamo";
 import { applyStats, fetchStatsMap } from "../../lib/campaign-stats";
 import {
@@ -61,11 +61,49 @@ function toRow(item: Item) {
     failedCount: item.failedCount || 0,
     skippedCount: item.skippedCount || 0,
     estimatedCost: item.estimatedCost || null,
-    respectUnsubscribeList: item.respectUnsubscribeList !== false,
-    excludePaidUsers: item.excludePaidUsers !== false,
-    numberCount: Array.isArray(item.selectedNumbers) ? item.selectedNumbers.length : 0,
     actualCost: calculateActualCost((item.deliveredCount as number) || 0, (item.templateCategory as string) || "utility"),
   };
+}
+
+interface AudienceInfo {
+  respectUnsubscribeList: boolean;
+  excludePaidUsers: boolean;
+  numberCount: number;
+}
+
+/**
+ * Audience filters + sender count for the rows on screen only. LIST_PROJECTION
+ * leaves these out on purpose (selectedNumbers is most of an item's size), so
+ * they're read here for one page's worth of campaigns instead of every one.
+ */
+async function fetchAudienceMap(campaignIds: string[]): Promise<Map<string, AudienceInfo>> {
+  const out = new Map<string, AudienceInfo>();
+  for (let i = 0; i < campaignIds.length; i += 100) {
+    let keys: Record<string, unknown>[] | undefined = campaignIds
+      .slice(i, i + 100)
+      .map((id) => ({ PK: `CAMP#${id}`, SK: "METADATA" }));
+    for (let attempt = 0; keys?.length && attempt < 3; attempt++) {
+      const res = await docClient.send(
+        new BatchGetCommand({
+          RequestItems: {
+            [TABLES.CAMPAIGNS]: {
+              Keys: keys,
+              ProjectionExpression: "campaignId, respectUnsubscribeList, excludePaidUsers, selectedNumbers",
+            },
+          },
+        })
+      );
+      for (const item of res.Responses?.[TABLES.CAMPAIGNS] || []) {
+        out.set(item.campaignId as string, {
+          respectUnsubscribeList: item.respectUnsubscribeList !== false,
+          excludePaidUsers: item.excludePaidUsers !== false,
+          numberCount: Array.isArray(item.selectedNumbers) ? item.selectedNumbers.length : 0,
+        });
+      }
+      keys = res.UnprocessedKeys?.[TABLES.CAMPAIGNS]?.Keys as Record<string, unknown>[] | undefined;
+    }
+  }
+  return out;
 }
 
 /**
@@ -208,11 +246,14 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       pageCampaigns = filteredSorted.slice((page - 1) * limit, page * limit).map(toRow);
     }
 
+    const audienceMap = await fetchAudienceMap(pageCampaigns.map((c) => c.campaignId as string));
+    const rows = pageCampaigns.map((c) => ({ ...c, ...audienceMap.get(c.campaignId as string) }));
+
     const totalPages = Math.max(1, Math.ceil(totalCount / limit));
 
     return success(
       {
-        campaigns: pageCampaigns,
+        campaigns: rows,
         totalCount,
         page,
         limit,
