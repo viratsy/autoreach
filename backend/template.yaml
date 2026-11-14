@@ -65,6 +65,18 @@ Parameters:
     Type: String
     Default: "dev"
     Description: "Environment name (hardik/navin)"
+  SignupPoolQualities:
+    Type: String
+    Default: "RED"
+    Description: "Comma-separated quality ratings NumberRotationFunction puts in the free_workshop_meta signup pool (e.g. RED or RED,YELLOW)"
+  SignupPoolExcludeNames:
+    Type: String
+    Default: ""
+    Description: "Comma-separated display-name prefixes NumberRotationFunction keeps OUT of this account's own signup pool (e.g. Jatan, whose numbers feed the other account's pool)"
+  SignupPoolExtra:
+    Type: String
+    Default: ""
+    Description: "Extra signup-pool numbers owned by another account's business record, as biz:pnid1@waba1/pnid2@waba2;biz2:pnid3@waba3 (the @waba part enables a live template-approval check; see number-rotation.ts)"
   MentorName:
     Type: String
     Default: "Hardik Raja"
@@ -89,6 +101,14 @@ Parameters:
     Type: String
     Default: "12"
     Description: "Emails/sec one email worker sends. Must stay under this account's SES rate limit — the worker is capped to one concurrent invocation, so this IS the account-wide send rate"
+  AlertSenders:
+    Type: String
+    Default: ""
+    Description: "WhatsApp numbers that send campaign-failure alerts, as businessId:phoneNumberId,... in fallback order. Empty disables the alerts"
+  AlertRecipients:
+    Type: String
+    Default: "918427051955,919082083538"
+    Description: "WhatsApp numbers that receive campaign-failure alerts (comma-separated, with country code)"
 
 Resources:
   # --- Lambda Layer ---
@@ -1258,6 +1278,37 @@ Resources:
             Schedule: cron(30 19 * * ? *)
             Description: "Auto-stop campaigns still running from a previous day, 1 AM IST"
 
+  FailureAlertSweepFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: dist/handlers/campaigns/failure-alert-sweep.handler
+      Timeout: 120
+      MemorySize: 256
+      Environment:
+        Variables:
+          NOTIFICATIONS_TABLE: !Sub "autoreach-notifications-${EnvName}"
+          ALERT_SENDERS: !Ref AlertSenders
+          ALERT_RECIPIENTS: !Ref AlertRecipients
+          ALERT_TEMPLATE_NAME: "campaign_failure_alert"
+          ALERT_TEMPLATE_LANG: "en"
+          ALERT_MIN_FAILURES: "5"
+          ALERT_ACCOUNT_LABEL: !Ref MentorName
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CampaignsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref MessagesTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref BusinessesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Sub "autoreach-notifications-${EnvName}"
+      Events:
+        Every5Min:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Description: "WhatsApp-alert operators when a campaign fails for a business-side reason (payment, template, params, token, media)"
+
   NumberHealthSweepFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1663,8 +1714,10 @@ Resources:
       Environment:
         Variables:
           ROTATION_TARGET_FUNCTION: "free_workshop_meta"
-          # Both accounts' signup flows run on RED numbers only.
-          SIGNUP_POOL_QUALITIES: "RED"
+          # Per account via samconfig (both RED,YELLOW as of 14 Nov).
+          SIGNUP_POOL_QUALITIES: !Ref SignupPoolQualities
+          SIGNUP_POOL_EXTRA: !Ref SignupPoolExtra
+          SIGNUP_POOL_EXCLUDE_NAMES: !Ref SignupPoolExcludeNames
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref BusinessesTable
@@ -1682,11 +1735,12 @@ Resources:
         DailySchedule:
           Type: Schedule
           Properties:
-            # 9:00 AM IST — 30 min after DailySyncFunction's template sync, so a
-            # template approved overnight is already recorded before numbers are
-            # tested for eligibility.
-            Schedule: cron(30 3 * * ? *)
-            Description: "Rotate free_workshop_meta sender pool by number quality at 9 AM IST"
+            # Every 2 hours on the even IST hour (6:00, 8:00, 10:00 ...). Quality
+            # ratings move within hours, so a daily run left RED/YELLOW numbers
+            # out of the pool (and recovered GREEN ones in it) for most of a day.
+            Schedule: cron(30 0/2 * * ? *)
+            Enabled: true
+            Description: "Rotate free_workshop_meta sender pool by number quality every 2 hours"
 
   # Projects the signup confirmations free_workshop_meta logs in comm_messages
   # into read-only "<date>_<workshop>_signup" campaigns so their delivery stats

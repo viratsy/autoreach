@@ -9,6 +9,11 @@ describe("extractKnownErrorCode", () => {
     expect(extractKnownErrorCode("(#131042) Payment method issue")).toBe("131042");
   });
 
+  it("matches a bare 1-2 digit code (e.g. \"2\" temporary downtime)", () => {
+    expect(extractKnownErrorCode("2")).toBe("2");
+    expect(extractKnownErrorCode("10")).toBe("10");
+  });
+
   it("returns null for an unrecognized numeric code", () => {
     expect(extractKnownErrorCode("999999")).toBeNull();
   });

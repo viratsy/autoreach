@@ -20,14 +20,18 @@ interface TestResult {
   error?: string;
   messageId?: string;
   checkingDelivery?: boolean;
+  delivered?: boolean;
 }
 
 // Meta's send response only confirms the message was ACCEPTED, not delivered —
 // a payment/billing issue is often only reported a few seconds later via an async
 // webhook. Poll test-send-status.ts briefly so the wizard catches that instead of
 // showing a false "sent" for something that's actually about to fail.
-const DELIVERY_POLL_INTERVAL_MS = 2000;
-const DELIVERY_POLL_ATTEMPTS = 7; // ~14s total
+const DELIVERY_POLL_INTERVAL_MS = 3000;
+const DELIVERY_POLL_ATTEMPTS = 15; // ~45s total — enough for delivery receipts on a 40-50 number test
+// Numbers per test-send request. One request for 40-50 numbers ran past API
+// Gateway's 29s limit and errored partway; small chunks also give live progress.
+const SEND_CHUNK_SIZE = 10;
 
 export default function TestMessage({ draft, onUpdate, onNext, onBack }: Props) {
   const [testPhone, setTestPhone] = useState("");
@@ -46,6 +50,7 @@ export default function TestMessage({ draft, onUpdate, onNext, onBack }: Props) 
   const [sending, setSending] = useState(false);
   const [results, setResults] = useState<TestResult[]>([]);
   const [sent, setSent] = useState(false);
+  const [progress, setProgress] = useState(0);
 
   const paramCount = draft.template?.parameterCount || 0;
   const params = Array.from({ length: paramCount }, (_, i) => String(i + 1));
@@ -57,37 +62,46 @@ export default function TestMessage({ draft, onUpdate, onNext, onBack }: Props) 
   const handleTestSend = async () => {
     setSending(true);
     setResults([]);
-    try {
-      const data = await apiRequest<{ results: TestResult[] }>("/campaigns/test-send", {
-        method: "POST",
-        body: JSON.stringify({
-          businessId: draft.business!.businessId,
-          selectedNumbers: draft.selectedNumbers,
-          templateName: draft.template!.templateName,
-          templateMappings: draft.templateMappings,
-          parameterValues: paramValues,
-          headerImageUrl: draft.headerImageUrl || undefined,
-          numbersWithImageHeader: draft.numbersWithImageHeader,
-          testPhone,
-        }),
-      });
-      const withChecking = data.results.map((r) =>
-        r.status === "sent" && r.messageId ? { ...r, checkingDelivery: true } : r
-      );
-      setResults(withChecking);
-      setSent(true);
-      pollDeliveryStatus(withChecking);
-    } catch (err) {
-      console.error("Test send failed:", err);
-      setResults([{
-        phoneNumberId: "",
-        displayName: "All",
-        status: "failed",
-        error: err instanceof Error ? err.message : "Test send failed",
-      }]);
-    } finally {
-      setSending(false);
+    setProgress(0);
+    const all: TestResult[] = [];
+    const numbers = draft.selectedNumbers;
+    for (let i = 0; i < numbers.length; i += SEND_CHUNK_SIZE) {
+      const chunk = numbers.slice(i, i + SEND_CHUNK_SIZE);
+      try {
+        const data = await apiRequest<{ results: TestResult[] }>("/campaigns/test-send", {
+          method: "POST",
+          body: JSON.stringify({
+            businessId: draft.business!.businessId,
+            selectedNumbers: chunk,
+            templateName: draft.template!.templateName,
+            templateMappings: draft.templateMappings,
+            parameterValues: paramValues,
+            headerImageUrl: draft.headerImageUrl || undefined,
+            numbersWithImageHeader: draft.numbersWithImageHeader,
+            testPhone,
+          }),
+        });
+        all.push(
+          ...data.results.map((r) => (r.status === "sent" && r.messageId ? { ...r, checkingDelivery: true } : r))
+        );
+      } catch (err) {
+        // One chunk failing shouldn't hide the others — mark just its numbers.
+        console.error("Test send chunk failed:", err);
+        all.push(
+          ...chunk.map((n) => ({
+            phoneNumberId: n.phoneNumberId,
+            displayName: n.displayName,
+            status: "failed",
+            error: err instanceof Error ? err.message : "Test send failed",
+          }))
+        );
+      }
+      setProgress(Math.min(i + SEND_CHUNK_SIZE, numbers.length));
+      setResults([...all]);
     }
+    setSent(true);
+    setSending(false);
+    pollDeliveryStatus(all);
   };
 
   const pollDeliveryStatus = async (initialResults: TestResult[]) => {
@@ -119,8 +133,8 @@ export default function TestMessage({ draft, onUpdate, onNext, onBack }: Props) 
           if (s.status === "failed") {
             return { ...r, checkingDelivery: false, status: "failed", error: s.errorLabel || s.errorCode || "Delivery failed" };
           }
-          // delivered/read etc. — confirmed fine, stop checking
-          return { ...r, checkingDelivery: false };
+          // delivered/read — confirmed on the phone, stop checking
+          return { ...r, checkingDelivery: false, delivered: true };
         })
       );
 
@@ -194,27 +208,36 @@ export default function TestMessage({ draft, onUpdate, onNext, onBack }: Props) 
         className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-50 hover:bg-blue-700 transition-colors"
       >
         <Send className="w-4 h-4" />
-        {sending ? "Sending..." : `Send Test to ${testPhone || "..."}`}
+        {sending
+          ? `Sending... ${progress}/${draft.selectedNumbers.length}`
+          : `Send Test to ${testPhone || "..."}`}
       </button>
 
       {/* Results */}
       {results.length > 0 && (() => {
         const failedCount = results.filter((r) => r.status === "failed").length;
         const checkingCount = results.filter((r) => r.checkingDelivery).length;
-        const okCount = results.length - failedCount - checkingCount;
+        const deliveredCount = results.filter((r) => r.delivered).length;
+        const okCount = results.length - failedCount - checkingCount - deliveredCount;
+        // Failures first, then still-checking, so problems don't get lost in a long list.
+        const rank = (r: TestResult) => (r.status === "failed" ? 0 : r.checkingDelivery ? 1 : r.delivered ? 3 : 2);
+        const sorted = [...results].sort((a, b) => rank(a) - rank(b));
         return (
         <div className="mt-5 space-y-2">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <p className="text-sm font-medium text-gray-700">Results ({results.length} numbers):</p>
             <div className="flex items-center gap-3 text-xs font-medium">
-              <span className="flex items-center gap-1 text-green-700"><CheckCircle className="w-3.5 h-3.5" />{okCount} done</span>
+              <span className="flex items-center gap-1 text-green-700"><CheckCircle className="w-3.5 h-3.5" />{deliveredCount} delivered</span>
+              {okCount > 0 && (
+                <span className="flex items-center gap-1 text-gray-600"><CheckCircle className="w-3.5 h-3.5" />{okCount} accepted (no receipt yet)</span>
+              )}
               {checkingCount > 0 && (
                 <span className="flex items-center gap-1 text-amber-700"><RefreshCw className="w-3.5 h-3.5 animate-spin" />{checkingCount} checking</span>
               )}
               <span className="flex items-center gap-1 text-red-700"><XCircle className="w-3.5 h-3.5" />{failedCount} failed</span>
             </div>
           </div>
-          {results.map((r, i) => {
+          {sorted.map((r, i) => {
             const number = draft.selectedNumbers.find((n) => n.phoneNumberId === r.phoneNumberId);
             return (
               <div
@@ -246,7 +269,7 @@ export default function TestMessage({ draft, onUpdate, onNext, onBack }: Props) 
                     </p>
                   ) : (
                     <p className="text-xs text-green-700">
-                      Accepted by Meta • ID: {r.messageId?.slice(0, 20)}...
+                      {r.delivered ? "Delivered to phone" : "Accepted by Meta • no delivery receipt yet"} • ID: {r.messageId?.slice(0, 20)}...
                     </p>
                   )}
                 </div>

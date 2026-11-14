@@ -24,29 +24,33 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
     const statuses: Record<string, { status: string; errorCode?: string; errorLabel?: string }> = {};
 
-    for (const messageId of messageIds) {
-      const result = await docClient.send(
-        new QueryCommand({
-          TableName: TABLES.MESSAGES,
-          IndexName: "GSI1",
-          KeyConditionExpression: "GSI1PK = :pk",
-          ExpressionAttributeValues: { ":pk": `METAMSG#${messageId}` },
-        })
-      );
-      const item = result.Items?.[0];
-      if (!item) {
-        statuses[messageId] = { status: "unknown" };
-        continue;
-      }
+    // One lookup per message, run together — a 40-50 number test polled
+    // sequentially made every status check slow.
+    await Promise.all(
+      messageIds.map(async (messageId) => {
+        const result = await docClient.send(
+          new QueryCommand({
+            TableName: TABLES.MESSAGES,
+            IndexName: "GSI1",
+            KeyConditionExpression: "GSI1PK = :pk",
+            ExpressionAttributeValues: { ":pk": `METAMSG#${messageId}` },
+          })
+        );
+        const item = result.Items?.[0];
+        if (!item) {
+          statuses[messageId] = { status: "unknown" };
+          return;
+        }
 
-      const errorCode = item.errorCode as string | null | undefined;
-      const knownCode = errorCode ? extractKnownErrorCode(errorCode) : null;
-      statuses[messageId] = {
-        status: item.status as string,
-        errorCode: errorCode || undefined,
-        errorLabel: knownCode ? META_ERROR_CODES[knownCode].label : undefined,
-      };
-    }
+        const errorCode = item.errorCode as string | null | undefined;
+        const knownCode = errorCode ? extractKnownErrorCode(errorCode) : null;
+        statuses[messageId] = {
+          status: item.status as string,
+          errorCode: errorCode || undefined,
+          errorLabel: knownCode ? META_ERROR_CODES[knownCode].label : undefined,
+        };
+      })
+    );
 
     return success({ statuses }, origin);
   } catch (err) {

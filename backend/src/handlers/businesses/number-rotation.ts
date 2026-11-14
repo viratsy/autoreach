@@ -20,13 +20,22 @@ const MIN_POOL = 5;
 // DEGRADED numbers: signup confirmations are opt-in, genuinely wanted messages,
 // so they generate positive engagement that helps a number recover, while the
 // GREEN numbers stay reserved for the heavier campaign sending.
-// SIGNUP_POOL_QUALITIES narrows it per account (Navin runs RED only).
+// SIGNUP_POOL_QUALITIES narrows it per account (both RED,YELLOW as of 14 Nov).
 const DEGRADED = new Set(
   (process.env.SIGNUP_POOL_QUALITIES || "RED,YELLOW,UNKNOWN")
     .split(",")
     .map((q) => q.trim().toUpperCase())
     .filter(Boolean)
 );
+
+// Display-name prefixes (case-insensitive, comma-separated) whose numbers this
+// account must NOT put in its own pool — e.g. Hardik's "Jatan" numbers, which
+// feed Navin's signup pool via SIGNUP_POOL_EXTRA instead. Without this they'd
+// sit in both pools and carry double signup load on top of campaign sending.
+const EXCLUDE_NAME_PREFIXES = (process.env.SIGNUP_POOL_EXCLUDE_NAMES || "")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
 
 interface Candidate {
   businessId: string;
@@ -36,14 +45,14 @@ interface Candidate {
 }
 
 /**
- * Daily rebuild of free_workshop_meta's sender pool, keyed off each number's
+ * Two-hourly rebuild of free_workshop_meta's sender pool, keyed off each number's
  * live quality rating.
  *
  * Writes ONLY the WA_SENDER_POOL variable (number IDs grouped by business) —
  * never the WA_TOKEN_* variables, so a bug here can't clobber or leak a
  * credential. free_workshop_meta expands business -> token at send time.
  *
- * Runs after the 8:30 AM template sync so a template approved overnight is
+ * The 10 AM IST run is the first after the 8:30 AM template sync, so a template approved overnight is
  * already visible when eligibility is checked.
  */
 export const handler: Handler = async () => {
@@ -90,8 +99,18 @@ export const handler: Handler = async () => {
       // happens to fire a quality webhook, so it drifts for weeks.
       await persistQuality(business, checked);
 
+      const excluded = new Set(
+        numbers
+          .filter((pn) => {
+            const name = String((pn as { displayName?: string }).displayName || "").toLowerCase();
+            return EXCLUDE_NAME_PREFIXES.some((p) => name.startsWith(p));
+          })
+          .map((pn) => pn.phoneNumberId)
+      );
+
       const eligible: Candidate[] = [];
       for (const c of checked) {
+        if (excluded.has(c.phoneNumberId)) continue;
         if (c.status !== "CONNECTED") continue; // PENDING numbers fail 133010 on every send
         if (!approvedOn.has(c.phoneNumberId)) continue; // missing template fails 132001
         eligible.push({
@@ -119,6 +138,45 @@ export const handler: Handler = async () => {
         // green kept aside below, only used to satisfy MIN_POOL
       };
       (pool[business.businessId] as unknown as { _green: string[] })._green = green.map((c) => c.phoneNumberId);
+    }
+
+    // Extra numbers owned by a business record on ANOTHER account (e.g. Hardik's
+    // Jatan numbers feeding Navin's signup flow). Format:
+    //   SIGNUP_POOL_EXTRA = "skill_nation:pnid1@waba1/pnid2@waba2/...;other_biz:pnid3@waba3"
+    // They're sent with the named business's token on the target function, so
+    // that token must have access to them. This account's Templates table
+    // can't see their WABAs, so when an entry carries "@wabaid" the template's
+    // approval is checked live on Meta (an entry without it is trusted as-is).
+    // Same CONNECTED + quality filter as owned numbers; never used as green
+    // top-up.
+    for (const [bizKey, entries] of parseExtra(process.env.SIGNUP_POOL_EXTRA || "")) {
+      const business = businesses.find((b) => b.businessId === bizKey);
+      if (!business || !env[`WA_TOKEN_${bizKey.toUpperCase()}`]) {
+        console.log(`SIGNUP_POOL_EXTRA: no business/token for ${bizKey}, skipping ${entries.length} number(s)`);
+        continue;
+      }
+      const wabaOf = new Map<string, string>();
+      const ids = entries.map((e) => {
+        const [id, waba] = e.split("@");
+        if (waba) wabaOf.set(id, waba);
+        return id;
+      });
+      const approvedWabas = await wabasWithTemplate([...new Set(wabaOf.values())], requiredTemplate, business.accessToken);
+      const checked = await checkQuality(
+        ids.map((id) => ({ phoneNumberId: id, displayNumber: id }) as PhoneNumber),
+        business.accessToken
+      );
+      const cfg = (pool[bizKey] ||= { template: requiredTemplate, lang, numbers: [] });
+      const before = cfg.numbers.length;
+      for (const c of checked) {
+        const waba = wabaOf.get(c.phoneNumberId);
+        if (waba && !approvedWabas.has(waba)) continue; // missing template fails 132001
+        if (c.status === "CONNECTED" && DEGRADED.has(c.quality) && !cfg.numbers.includes(c.phoneNumberId)) {
+          cfg.numbers.push(c.phoneNumberId);
+          totalDegraded++;
+        }
+      }
+      console.log(`SIGNUP_POOL_EXTRA ${bizKey}: ${cfg.numbers.length - before} of ${ids.length} extra numbers added`);
     }
 
     // Top up to MIN_POOL with GREEN numbers if there aren't enough degraded
@@ -178,6 +236,18 @@ export const handler: Handler = async () => {
   }
 };
 
+function parseExtra(raw: string): Array<[string, string[]]> {
+  return raw
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const [biz, list = ""] = part.split(":");
+      return [biz.trim(), list.split("/").map((x) => x.trim()).filter(Boolean)] as [string, string[]];
+    })
+    .filter(([biz, ids]) => biz && ids.length > 0);
+}
+
 function envSize(env: Record<string, string>): number {
   return Object.entries(env).reduce((n, [k, v]) => n + k.length + (v || "").length, 0);
 }
@@ -219,6 +289,30 @@ async function numbersWithTemplate(businessId: string, templateName: string): Pr
     lastKey = res.LastEvaluatedKey as Record<string, unknown> | undefined;
   } while (lastKey);
   return ids;
+}
+
+/** WABA ids (of those given) where `templateName` is APPROVED, checked live on
+ * Meta. A WABA whose lookup fails is treated as not approved. */
+async function wabasWithTemplate(wabaIds: string[], templateName: string, accessToken: string): Promise<Set<string>> {
+  const ok = new Set<string>();
+  const CONCURRENCY = 10;
+  for (let i = 0; i < wabaIds.length; i += CONCURRENCY) {
+    await Promise.all(
+      wabaIds.slice(i, i + CONCURRENCY).map(async (waba) => {
+        try {
+          const res = await fetch(
+            `https://graph.facebook.com/v25.0/${waba}/message_templates?name=${encodeURIComponent(templateName)}&fields=name,status&limit=100`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          const data = (await res.json()) as { data?: Array<{ name: string; status: string }> };
+          if ((data.data || []).some((t) => t.name === templateName && t.status === "APPROVED")) ok.add(waba);
+        } catch (err) {
+          console.error(`Template check failed for WABA ${waba}:`, err);
+        }
+      })
+    );
+  }
+  return ok;
 }
 
 interface Checked {

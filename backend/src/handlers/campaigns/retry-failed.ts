@@ -53,18 +53,25 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     const campaign = campResult.Item;
     if (!campaign) return error(404, "Campaign not found", origin);
 
-    // Get all failed messages
-    const failedResult = await docClient.send(
-      new QueryCommand({
-        TableName: TABLES.MESSAGES,
-        KeyConditionExpression: "PK = :pk",
-        FilterExpression: "#s = :failed",
-        ExpressionAttributeNames: { "#s": "status" },
-        ExpressionAttributeValues: { ":pk": `CAMP#${campaignId}`, ":failed": "failed" },
-      })
-    );
-
-    const allFailedMessages = failedResult.Items || [];
+    // Get all failed messages. Must paginate: a single Query only reads 1MB of the
+    // partition before applying the filter, so on a ~29k-message campaign it saw
+    // just the first ~229 of 1,614 failures and silently skipped the rest.
+    const allFailedMessages: Record<string, any>[] = [];
+    let lastKey: Record<string, unknown> | undefined;
+    do {
+      const page = await docClient.send(
+        new QueryCommand({
+          TableName: TABLES.MESSAGES,
+          KeyConditionExpression: "PK = :pk",
+          FilterExpression: "#s = :failed",
+          ExpressionAttributeNames: { "#s": "status" },
+          ExpressionAttributeValues: { ":pk": `CAMP#${campaignId}`, ":failed": "failed" },
+          ExclusiveStartKey: lastKey,
+        })
+      );
+      allFailedMessages.push(...(page.Items || []));
+      lastKey = page.LastEvaluatedKey as Record<string, unknown> | undefined;
+    } while (lastKey);
     const failedMessages = reasonFilter
       ? allFailedMessages.filter((m) => reasonFilter.has((m.errorCode as string) || "Unknown"))
       : allFailedMessages;
@@ -154,6 +161,15 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     }
 
     const accessToken = business.accessToken;
+    // Same per-number routing data send.ts puts on every batch. Without wabaid,
+    // send-worker can't look up the template's real language and falls back to
+    // "en_US" — every retry of an "en" template then failed with 132001
+    // ("template does not exist in the translation").
+    const provider = (business.provider as string) || "meta";
+    type NumberRouting = { phoneNumberId: string; wabaid?: string; apiKey?: string; source?: string; endpoint?: string; displayName?: string };
+    const bizNumbersById = new Map<string, NumberRouting>(
+      ((business.phoneNumbers || []) as NumberRouting[]).map((pn) => [pn.phoneNumberId, pn])
+    );
 
     // Group retryable messages by sending number
     const byNumber: Record<string, typeof retryable> = {};
@@ -207,6 +223,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           MessageDeduplicationId: `retry-${campaignId}-${phoneNumberId}-${retryRunId}`,
           MessageBody: JSON.stringify({
             campaignId,
+            provider,
             templateName: campaign.templateName,
             templateMappings: campaign.templateMappings || {},
             parameterMapping: campaign.parameterMapping || {},
@@ -218,7 +235,11 @@ export const handler: APIGatewayProxyHandler = async (event) => {
             batch: {
               contacts,
               phoneNumberId,
-              displayName: "",
+              displayName: bizNumbersById.get(phoneNumberId)?.displayName || "",
+              wabaid: bizNumbersById.get(phoneNumberId)?.wabaid,
+              apiKey: bizNumbersById.get(phoneNumberId)?.apiKey,
+              source: bizNumbersById.get(phoneNumberId)?.source,
+              endpoint: bizNumbersById.get(phoneNumberId)?.endpoint,
             },
           }),
         })

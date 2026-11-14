@@ -87,6 +87,11 @@ export const META_ERROR_CODES: Record<string, { retryable: boolean; label: strin
 /** Extracts a known numeric error code from a raw errorCode value, whether it's
  * already bare ("131042") or embedded in Meta's message text ("(#131042) ..."). */
 export function extractKnownErrorCode(errorCode: string): string | null {
+  // Bare codes (as stored by the webhook / send-worker) can be 1-2 digits —
+  // "2" (temporary downtime), "4", "10", "33" — which the 3-6 digit scan below
+  // never matched, so they were classed "unrecognized" and never retried.
+  const bare = errorCode.trim();
+  if (META_ERROR_CODES[bare]) return bare;
   const match = errorCode.match(/\d{3,6}/);
   if (match && META_ERROR_CODES[match[0]]) return match[0];
   return null;

@@ -51,8 +51,25 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     );
     const results: { phoneNumberId: string; displayName: string; status: string; error?: string; messageId?: string }[] = [];
 
-    // Send test from each selected number
-    for (const number of selectedNumbers) {
+    // Sending one number at a time took ~1.2s per number (language lookup +
+    // send), so 40-50 numbers ran past API Gateway's 29s cutoff: the dashboard
+    // showed an error after a few numbers while the Lambda kept sending
+    // unseen until its own timeout, and the rest never went out. Send from a
+    // handful of numbers concurrently instead, each Meta call with a timeout.
+    const CONCURRENCY = 10;
+    const CALL_TIMEOUT_MS = 8000;
+    const fetchT = async (url: string, init: RequestInit = {}) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);
+      try {
+        return await fetch(url, { ...init, signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sendFrom = async (number: any) => {
       const tplName = templateMappings?.[number.phoneNumberId] || templateName;
 
       if (provider !== "meta") {
@@ -79,7 +96,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           error: result.ok ? undefined : result.error,
           messageId: result.messageId,
         });
-        continue;
+        return;
       }
 
       try {
@@ -92,7 +109,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         const testWabaid = bizNumbersById.get(number.phoneNumberId)?.wabaid;
         if (testWabaid) {
           try {
-            const tplRes = await fetch(
+            const tplRes = await fetchT(
               `https://graph.facebook.com/v25.0/${testWabaid}/message_templates?name=${encodeURIComponent(tplName)}&limit=25`,
               { headers: { Authorization: `Bearer ${accessToken}` } }
             );
@@ -124,7 +141,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
         console.log(`Sending to ${number.phoneNumberId}:`, JSON.stringify(requestBody));
 
-        const response = await fetch(
+        const response = await fetchT(
           `https://graph.facebook.com/v25.0/${number.phoneNumberId}/messages`,
           {
             method: "POST",
@@ -194,7 +211,18 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           error: err instanceof Error ? err.message : "Request failed",
         });
       }
-    }
+    };
+
+    const queue = [...selectedNumbers];
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+        while (queue.length) await sendFrom(queue.shift());
+      })
+    );
+
+    // Keep the caller's number order — concurrent sends finish out of order.
+    const order = new Map((selectedNumbers as { phoneNumberId: string }[]).map((n, i) => [n.phoneNumberId, i]));
+    results.sort((a, b) => (order.get(a.phoneNumberId) ?? 0) - (order.get(b.phoneNumberId) ?? 0));
 
     return success({ results }, origin);
   } catch (err) {
