@@ -12,9 +12,12 @@ const TARGET_FUNCTION = process.env.ROTATION_TARGET_FUNCTION || "free_workshop_m
 // grow a little without a rotation suddenly becoming unwritable.
 const ENV_BUDGET_BYTES = 3800;
 
-// Never hand free_workshop_meta a pool smaller than this — an empty or
-// near-empty pool means real signups stop getting their WhatsApp confirmation.
-const MIN_POOL = 5;
+// Pool floor: below this, GREEN numbers are topped in so signups keep getting
+// their WhatsApp confirmation. Counted across all businesses in the pool.
+// SIGNUP_POOL_MIN is 3 on both accounts as of 15 Nov; 0 disables the top-up
+// (pool holds ONLY degraded numbers; with none at all the previous pool is left
+// untouched — see poolSize === 0 below).
+const MIN_POOL = Math.max(0, Number(process.env.SIGNUP_POOL_MIN ?? "5") || 0);
 
 // Quality tiers that belong in this pool. The pool deliberately carries the
 // DEGRADED numbers: signup confirmations are opt-in, genuinely wanted messages,
@@ -29,9 +32,9 @@ const DEGRADED = new Set(
 );
 
 // Display-name prefixes (case-insensitive, comma-separated) whose numbers this
-// account must NOT put in its own pool — e.g. Hardik's "Jatan" numbers, which
-// feed Navin's signup pool via SIGNUP_POOL_EXTRA instead. Without this they'd
-// sit in both pools and carry double signup load on top of campaign sending.
+// account must NOT put in its own pool — e.g. numbers that instead feed the
+// other account's pool via SIGNUP_POOL_EXTRA (Hardik's "Jatan" numbers did
+// until 15 Nov; they're now in Hardik's own pool and nothing is excluded).
 const EXCLUDE_NAME_PREFIXES = (process.env.SIGNUP_POOL_EXCLUDE_NAMES || "")
   .split(",")
   .map((s) => s.trim().toLowerCase())

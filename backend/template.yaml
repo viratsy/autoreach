@@ -69,6 +69,10 @@ Parameters:
     Type: String
     Default: "RED"
     Description: "Comma-separated quality ratings NumberRotationFunction puts in the free_workshop_meta signup pool (e.g. RED or RED,YELLOW)"
+  SignupPoolMin:
+    Type: String
+    Default: "5"
+    Description: "Floor for the free_workshop_meta signup pool; below it NumberRotationFunction tops up with GREEN numbers. 0 = never add GREEN numbers"
   SignupPoolExcludeNames:
     Type: String
     Default: ""
@@ -1718,6 +1722,7 @@ Resources:
           SIGNUP_POOL_QUALITIES: !Ref SignupPoolQualities
           SIGNUP_POOL_EXTRA: !Ref SignupPoolExtra
           SIGNUP_POOL_EXCLUDE_NAMES: !Ref SignupPoolExcludeNames
+          SIGNUP_POOL_MIN: !Ref SignupPoolMin
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref BusinessesTable
