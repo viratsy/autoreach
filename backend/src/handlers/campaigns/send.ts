@@ -134,7 +134,7 @@ export const handler: Handler = async (event) => {
     // Deduped before distribution so a repeated phone is messaged once and can't
     // land twice in one batch (see send-worker.ts — that crashes the batch).
     const csvContacts = await fetchCSVFromS3(campaign.csvS3Key);
-    const contacts = dedupeByPhone(csvContacts);
+    const contacts = dedupeByPhone(csvContacts, { keepBlank: true });
     console.log(
       `Read ${csvContacts.length} contacts from CSV` +
         (contacts.length !== csvContacts.length ? `, ${csvContacts.length - contacts.length} duplicate phone(s) dropped` : "")

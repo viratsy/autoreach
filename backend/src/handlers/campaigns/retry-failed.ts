@@ -263,7 +263,9 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       new UpdateCommand({
         TableName: TABLES.CAMPAIGNS,
         Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" },
-        UpdateExpression: "ADD totalBatches :nb",
+        // REMOVE autoClosed: auto-stop.ts's marker makes send-worker skip every
+        // batch of the campaign, which would silently swallow this retry.
+        UpdateExpression: "ADD totalBatches :nb REMOVE autoClosed",
         ExpressionAttributeValues: { ":nb": Object.keys(byNumber).length },
       })
     );

@@ -12,7 +12,8 @@ import { createNotification } from "../notifications/index";
  * from lingering as "running" forever. Marked "completed" (it did send — the
  * team found "cancelled" misleading) with autoClosed=true, which
  * send-worker.ts/email-worker.ts treat like "cancelled" so any batch still
- * queued is skipped rather than sent the next day.
+ * queued is skipped rather than sent the next day. A campaign that finished
+ * no batch at all genuinely didn't send, so it's still marked "cancelled".
  */
 export const handler: Handler = async () => {
   const todayIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -33,6 +34,7 @@ export const handler: Handler = async () => {
 
     for (const campaign of stuckCampaigns) {
       const now = new Date().toISOString();
+      const finalStatus = Number(campaign.completedBatches || 0) > 0 ? "completed" : "cancelled";
       try {
         await docClient.send(
           new UpdateCommand({
@@ -43,8 +45,8 @@ export const handler: Handler = async () => {
             ConditionExpression: "#status = :expected",
             ExpressionAttributeNames: { "#status": "status" },
             ExpressionAttributeValues: {
-              ":status": "completed",
-              ":gsi2pk": "STATUS#completed",
+              ":status": finalStatus,
+              ":gsi2pk": `STATUS#${finalStatus}`,
               ":now": now,
               ":true": true,
               ":expected": "running",
