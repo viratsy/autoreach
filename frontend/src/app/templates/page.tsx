@@ -5,7 +5,9 @@ import { useSearchParams } from "next/navigation";
 import AppShell from "@/components/layout/AppShell";
 import AuthGuard from "@/components/layout/AuthGuard";
 import { apiRequest } from "@/lib/api";
-import { Copy, CheckCircle, XCircle, RefreshCw, ExternalLink, Plus, Trash2 } from "lucide-react";
+import { Copy, CheckCircle, XCircle, RefreshCw, ExternalLink, Plus, Trash2, Eye, X } from "lucide-react";
+import TemplatePreview from "@/components/campaign/TemplatePreview";
+import { TemplateComponent } from "@/types";
 import ImagePicker from "@/components/campaign/ImagePicker";
 import { Provider } from "@/types";
 
@@ -24,6 +26,35 @@ interface TemplateInfo {
   categoryPerNumber?: Record<string, string>;
   hasImageHeaderPerNumber?: Record<string, boolean>;
   statusPerNumber?: Record<string, string>;
+  components?: TemplateComponent[];
+  lastSyncedAt?: string;
+}
+
+const PAGE_SIZE = 20;
+
+function formatSyncedAt(iso?: string) {
+  if (!iso) return "never";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "never";
+  return d.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "numeric", minute: "2-digit" });
+}
+
+// Sample values Meta stored with the template ({{1}} -> "Priya", ...) and the
+// header image it was approved with, so a preview reads like a real message
+// instead of a row of blanks.
+function previewInputs(components: TemplateComponent[] = []) {
+  const find = (type: string) =>
+    components.find((c) => String(c.type).toUpperCase() === type) as
+      | (TemplateComponent & { example?: { body_text?: string[][]; header_handle?: string[] } })
+      | undefined;
+  const values: Record<string, string> = {};
+  (find("BODY")?.example?.body_text?.[0] || []).forEach((v, i) => {
+    values[String(i + 1)] = v;
+  });
+  const header = find("HEADER");
+  const headerImageUrl =
+    String(header?.format || "").toUpperCase() === "IMAGE" ? header?.example?.header_handle?.[0] : undefined;
+  return { values, headerImageUrl };
 }
 
 export default function TemplatesPage() {
@@ -46,6 +77,12 @@ function TemplatesContent() {
   const [clearing, setClearing] = useState(false);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<"ALL" | "UTILITY" | "MARKETING">("ALL");
+  // Only PAGE_SIZE cards render at first (each carries a chip per number and
+  // a preview) — "Show more" adds the next page. Resets when the list changes.
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  useEffect(() => setVisibleCount(PAGE_SIZE), [search, categoryFilter, selectedBiz]);
+  // Last single-template "Sync with Meta" outcome, shown on that card.
+  const [syncResult, setSyncResult] = useState<Record<string, string>>({});
 
   // Copy state
   const [copyTemplate, setCopyTemplate] = useState<TemplateInfo | null>(null);
@@ -55,6 +92,32 @@ function TemplatesContent() {
   const [copying, setCopying] = useState(false);
   const [copyResults, setCopyResults] = useState<{ wabaid: string; status: string; error?: string }[]>([]);
   const [headerImageUrl, setHeaderImageUrl] = useState("");
+
+  // Per-number preview (eye icon on a number chip)
+  const [preview, setPreview] = useState<{
+    key: string;
+    templateName: string;
+    number: { displayName: string; displayNumber: string };
+    loading: boolean;
+    error?: string;
+    data?: { category?: string; status?: string; components: TemplateComponent[] };
+  } | null>(null);
+  const openNumberPreview = async (
+    templateName: string,
+    pn: { phoneNumberId: string; displayName: string; displayNumber: string }
+  ) => {
+    if (!selectedBiz) return;
+    const key = `${pn.phoneNumberId}#${templateName}`;
+    setPreview({ key, templateName, number: pn, loading: true });
+    try {
+      const d = await apiRequest<{ template: { category?: string; status?: string; components: TemplateComponent[] } }>(
+        `/templates?businessId=${selectedBiz.businessId}&phoneNumberId=${pn.phoneNumberId}&templateName=${encodeURIComponent(templateName)}`
+      );
+      setPreview((p) => (p && p.key === key ? { ...p, loading: false, data: d.template } : p));
+    } catch {
+      setPreview((p) => (p && p.key === key ? { ...p, loading: false, error: "Couldn't load this number's template" } : p));
+    }
+  };
 
   // Create template (Meta) state
   const [showCreate, setShowCreate] = useState(false);
@@ -137,12 +200,22 @@ function TemplatesContent() {
     if (!selectedBiz) return;
     setSyncingTemplate(templateName);
     try {
-      await apiRequest("/templates/fetch", {
-        method: "POST",
-        body: JSON.stringify({ businessId: selectedBiz.businessId, templateName }),
-      });
+      const r = await apiRequest<{ templates: Record<string, string[]>; removedOn?: string[]; failedOn?: string[] }>(
+        "/templates/fetch",
+        {
+          method: "POST",
+          body: JSON.stringify({ businessId: selectedBiz.businessId, templateName }),
+        }
+      );
+      const found = Object.values(r.templates || {}).filter((names) => names.includes(templateName)).length;
+      const parts = [`On ${found} number${found === 1 ? "" : "s"}`];
+      if (r.removedOn?.length) parts.push(`${r.removedOn.length} no longer have it`);
+      if (r.failedOn?.length) parts.push(`${r.failedOn.length} couldn't be checked`);
+      setSyncResult((s) => ({ ...s, [templateName]: parts.join(" · ") }));
       await loadTemplates();
-    } catch {} finally { setSyncingTemplate(null); }
+    } catch {
+      setSyncResult((s) => ({ ...s, [templateName]: "Sync failed — try again" }));
+    } finally { setSyncingTemplate(null); }
   };
 
   // Re-syncs just one phone number (a single Meta call for its WABA) instead
@@ -417,10 +490,10 @@ function TemplatesContent() {
               <p className="text-gray-500 text-sm">Loading...</p>
             ) : (
               <div className="space-y-2">
-                {filtered.map((tpl) => (
+                {filtered.slice(0, visibleCount).map((tpl) => (
                   <div key={tpl.templateName} className={`bg-white rounded-lg border p-4 ${tpl.category === "MARKETING" ? "border-orange-200" : "border-gray-200"}`}>
-                    <div className="flex items-center justify-between">
-                      <div>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <p className="font-medium text-gray-900 text-sm">{tpl.templateName}</p>
                           {Object.values(tpl.hasImageHeaderPerNumber || {}).some(Boolean) && (
@@ -464,9 +537,21 @@ function TemplatesContent() {
                                 {isPending && <span className="ml-0.5 text-[9px]">review</span>}
                                 {isRejected && <span className="ml-0.5 text-[9px]">rejected</span>}
                               </a>
-                              <a href={`https://business.facebook.com/wa/manage/message-templates/?waba_id=${pn.wabaid}`} target="_blank" rel="noopener noreferrer" className="block text-[9px] opacity-70 hover:underline hover:opacity-100">
-                                {pn.displayNumber}
-                              </a>
+                              <span className="flex items-center gap-1">
+                                <a href={`https://business.facebook.com/wa/manage/message-templates/?waba_id=${pn.wabaid}`} target="_blank" rel="noopener noreferrer" className="block text-[9px] opacity-70 hover:underline hover:opacity-100">
+                                  {pn.displayNumber}
+                                </a>
+                                {(isAvailable || isPending || isRejected) && (
+                                  <button
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); openNumberPreview(tpl.templateName, pn); }}
+                                    title={`Preview ${tpl.templateName} on ${pn.displayNumber}`}
+                                    aria-label={`Preview ${tpl.templateName} on ${pn.displayNumber}`}
+                                    className="opacity-60 hover:opacity-100"
+                                  >
+                                    <Eye className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </span>
                               {/* Re-sync just this one number's WABA (a single Meta call) —
                                   isolates whether a number missing this template is a real
                                   gap on Meta's side vs. an artifact of the full sync's
@@ -486,17 +571,19 @@ function TemplatesContent() {
                           })}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex flex-col items-end gap-2 shrink-0 w-[260px]">
+                      <div className="flex items-center gap-2">
                         {/* Re-sync just this one template — cheaper than the full "Sync from
                             Meta" above when only one row looks stale. */}
                         {(selectedBiz?.provider || "meta") !== "aisensy" && (
                           <button
                             onClick={() => syncOneTemplate(tpl.templateName)}
                             disabled={syncingTemplate === tpl.templateName}
-                            title="Re-sync this template"
-                            className="flex items-center gap-1 px-2 py-1.5 text-xs text-gray-500 hover:text-primary-700 disabled:opacity-50"
+                            title="Check this template's latest status on every number"
+                            className="flex items-center gap-1 px-3 py-1.5 text-xs bg-green-50 text-green-700 rounded-lg hover:bg-green-100 disabled:opacity-50"
                           >
-                            <RefreshCw className={`w-3.5 h-3.5 ${syncingTemplate === tpl.templateName ? "animate-spin" : ""}`} />
+                            <RefreshCw className={`w-3 h-3 ${syncingTemplate === tpl.templateName ? "animate-spin" : ""}`} />
+                            {syncingTemplate === tpl.templateName ? "Syncing…" : "Sync with Meta"}
                           </button>
                         )}
                         {/* Copy button — shown if there's somewhere left to copy to: more
@@ -518,9 +605,76 @@ function TemplatesContent() {
                           </button>
                         )}
                       </div>
+                      <p className="text-[10px] text-gray-500 text-right">
+                        Last updated: {formatSyncedAt(tpl.lastSyncedAt)}
+                        {syncResult[tpl.templateName] && (
+                          <span className="block text-gray-600">{syncResult[tpl.templateName]}</span>
+                        )}
+                      </p>
+                      {/* Inline preview: the first number (in the list order on the
+                          left) that has this template. The eye icon on any number
+                          shows that number's own copy, which can differ in structure. */}
+                      {(() => {
+                        const first = selectedBiz?.phoneNumbers.find((pn) => tpl.availableOn.includes(pn.phoneNumberId));
+                        if (!first || !tpl.components?.length) return null;
+                        const { values, headerImageUrl: img } = previewInputs(tpl.components);
+                        return (
+                          <div className="w-full">
+                            <p className="text-[10px] text-gray-400 mb-1 text-right">
+                              Preview · {first.displayName} {first.displayNumber}
+                            </p>
+                            <TemplatePreview template={{ components: tpl.components }} resolvedValues={values} headerImageUrl={img} />
+                          </div>
+                        );
+                      })()}
+                      </div>
                     </div>
                   </div>
                 ))}
+                {filtered.length > visibleCount && (
+                  <div className="flex items-center justify-center gap-3 pt-2">
+                    <span className="text-xs text-gray-500">
+                      Showing {visibleCount} of {filtered.length}
+                    </span>
+                    <button
+                      onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+                      className="px-3 py-1.5 text-xs bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                    >
+                      Show more
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Per-number template preview (eye icon) */}
+            {preview && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setPreview(null)}>
+                <div className="bg-white rounded-xl w-full max-w-sm p-4" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <p className="font-medium text-gray-900 text-sm">{preview.templateName}</p>
+                      <p className="text-xs text-gray-500">
+                        {preview.number.displayName} · {preview.number.displayNumber}
+                        {preview.data?.category && <> · {preview.data.category}</>}
+                        {preview.data?.status && <> · {String(preview.data.status).toLowerCase()}</>}
+                      </p>
+                    </div>
+                    <button onClick={() => setPreview(null)} aria-label="Close preview" className="text-gray-400 hover:text-gray-600">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {preview.loading ? (
+                    <p className="text-xs text-gray-400 py-10 text-center">Loading preview…</p>
+                  ) : preview.error || !preview.data ? (
+                    <p className="text-xs text-red-600 py-10 text-center">{preview.error || "No template data"}</p>
+                  ) : (
+                    (() => {
+                      const { values, headerImageUrl: img } = previewInputs(preview.data.components);
+                      return <TemplatePreview template={{ components: preview.data.components }} resolvedValues={values} headerImageUrl={img} />;
+                    })()
+                  )}
+                </div>
               </div>
             )}
 

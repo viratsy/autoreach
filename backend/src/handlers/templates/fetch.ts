@@ -1,5 +1,5 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import { GetCommand, PutCommand, QueryCommand, BatchWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, PutCommand, QueryCommand, BatchWriteCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, TABLES } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
 import { getProvider } from "../../lib/providers";
@@ -130,11 +130,16 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     // was causing). Fetching every number concurrently, each with its own
     // timeout so one hung WABA can't stall the rest, is the same fix already
     // applied to whatsapp-spend.ts for the identical root cause.
-    async function syncOneNumber(pn: PhoneNumber): Promise<{ phoneNumberId: string; names: string[] } | null> {
+    async function syncOneNumber(
+      pn: PhoneNumber
+    ): Promise<{ phoneNumberId: string; names: string[]; removed?: boolean; failed?: boolean } | null> {
       const wabaid = pn.wabaid;
       if (!wabaid) return null;
 
       const templates: MetaTemplate[] = [];
+      // False if any page failed — then "not returned" can't be trusted as
+      // "gone", so the single-template cleanup below must not delete anything.
+      let fetchedCleanly = true;
       let nextUrl: string | undefined = syncTemplateName
         ? `https://graph.facebook.com/v25.0/${wabaid}/message_templates?limit=100&name=${encodeURIComponent(syncTemplateName)}`
         : `https://graph.facebook.com/v25.0/${wabaid}/message_templates?limit=100`;
@@ -152,6 +157,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           });
         } catch (err) {
           console.error(`Templates fetch timed out/failed for ${pn.phoneNumberId}:`, err);
+          fetchedCleanly = false;
           break;
         } finally {
           clearTimeout(timer);
@@ -165,6 +171,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
         if (!response.ok || !data.data) {
           console.error(`Failed to fetch templates for ${pn.phoneNumberId}:`, data.error);
+          fetchedCleanly = false;
           break;
         }
 
@@ -214,7 +221,23 @@ export const handler: APIGatewayProxyHandler = async (event) => {
         );
       }
 
-      return { phoneNumberId: pn.phoneNumberId, names: deduped.map((t) => t.name) };
+      // Single-template sync is the "what's this template's status right now"
+      // check, so a number where Meta no longer has a sendable copy (rejected,
+      // deleted, or never there) must lose its stored row — otherwise it keeps
+      // showing whatever status it had at the last full sync. Deleting rather
+      // than storing "rejected" keeps campaign number pickers (which don't look
+      // at status) from treating it as available.
+      if (syncTemplateName && fetchedCleanly && !byName.has(syncTemplateName)) {
+        await docClient.send(
+          new DeleteCommand({
+            TableName: TABLES.TEMPLATES,
+            Key: { PK: `BIZ#${businessId}`, SK: `TPL#${pn.phoneNumberId}#${syncTemplateName}` },
+          })
+        );
+        return { phoneNumberId: pn.phoneNumberId, names: [], removed: true };
+      }
+
+      return { phoneNumberId: pn.phoneNumberId, names: deduped.map((t) => t.name), failed: !fetchedCleanly };
     }
 
     // One number's fetch/write failing (rate limit, transient DynamoDB error,
@@ -222,21 +245,37 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     // sync — Promise.all rejects as a whole on the first unhandled rejection,
     // which is exactly what turned one bad WABA into "the entire Clear &
     // Resync did nothing."
-    const results = await Promise.all(
-      phoneNumbers.map((pn) =>
-        syncOneNumber(pn).catch((err) => {
-          console.error(`syncOneNumber failed for ${pn.phoneNumberId}:`, err);
-          return null;
-        })
-      )
-    );
-
-    const allTemplates: Record<string, string[]> = {};
-    for (const r of results) {
-      if (r) allTemplates[r.phoneNumberId] = r.names;
+    const safeSync = (pn: PhoneNumber) =>
+      syncOneNumber(pn).catch((err) => {
+        console.error(`syncOneNumber failed for ${pn.phoneNumberId}:`, err);
+        return { phoneNumberId: pn.phoneNumberId, names: [] as string[], removed: false, failed: true };
+      });
+    // A single-template sync is one tiny request per number, so it runs 8 at a
+    // time — firing all ~120 numbers at once is what trips Meta's rate limit
+    // (HTTP 429), which would show up as false "failed" numbers. The full sync
+    // keeps its all-at-once fan-out (see the timing note above).
+    let results: Awaited<ReturnType<typeof safeSync>>[];
+    if (syncTemplateName) {
+      results = [];
+      const CONCURRENCY = 8;
+      for (let i = 0; i < phoneNumbers.length; i += CONCURRENCY) {
+        results.push(...(await Promise.all(phoneNumbers.slice(i, i + CONCURRENCY).map(safeSync))));
+      }
+    } else {
+      results = await Promise.all(phoneNumbers.map(safeSync));
     }
 
-    return success({ templates: allTemplates }, origin);
+    const allTemplates: Record<string, string[]> = {};
+    const removedOn: string[] = [];
+    const failedOn: string[] = [];
+    for (const r of results) {
+      if (!r) continue;
+      allTemplates[r.phoneNumberId] = r.names;
+      if (r.removed) removedOn.push(r.phoneNumberId);
+      if (r.failed) failedOn.push(r.phoneNumberId);
+    }
+
+    return success({ templates: allTemplates, removedOn, failedOn, syncedAt: new Date().toISOString() }, origin);
   } catch (err) {
     console.error("Template fetch error:", err);
     return error(500, "Failed to fetch templates", origin);

@@ -1,5 +1,5 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import { QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { QueryCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, TABLES } from "../../lib/dynamo";
 import { success, error, options } from "../../lib/response";
 import { getAuthEmail } from "../../lib/auth";
@@ -18,6 +18,31 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     const phoneNumberIds = event.queryStringParameters?.phoneNumberIds?.split(",") || [];
 
     if (!businessId) return error(400, "businessId is required", origin);
+
+    // Single-number mode (?phoneNumberId=&templateName=): the exact template
+    // row stored for that one number — the same name can have a different
+    // structure per number, so the Templates page's per-number preview needs
+    // this rather than the aggregate below.
+    const onePhone = event.queryStringParameters?.phoneNumberId;
+    const oneTemplate = event.queryStringParameters?.templateName;
+    if (onePhone && oneTemplate) {
+      const res = await docClient.send(
+        new GetCommand({ TableName: TABLES.TEMPLATES, Key: { PK: `BIZ#${businessId}`, SK: `TPL#${onePhone}#${oneTemplate}` } })
+      );
+      if (!res.Item) return error(404, "Template not found on this number", origin);
+      return success(
+        {
+          template: {
+            templateName: res.Item.templateName,
+            category: res.Item.category,
+            status: res.Item.status || "approved",
+            language: res.Item.language,
+            components: res.Item.components || [],
+          },
+        },
+        origin
+      );
+    }
 
     // Query all templates for this business. A business with many phone
     // numbers can have 1000+ template rows (one per number per template,
@@ -56,6 +81,8 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       paramCountPerNumber: Record<string, number>;
       hasImageHeaderPerNumber: Record<string, boolean>;
       statusPerNumber: Record<string, string>;
+      lastSyncedAt?: string;
+      lastSyncedPerNumber: Record<string, string>;
     }> = {};
 
     for (const item of items) {
@@ -96,6 +123,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
           paramCountPerNumber: {},
           hasImageHeaderPerNumber: {},
           statusPerNumber: {},
+          lastSyncedPerNumber: {},
         };
       }
       // See the note above: keep the richest variant so previews and header
@@ -113,6 +141,11 @@ export const handler: APIGatewayProxyHandler = async (event) => {
       templateMap[templateName].paramCountPerNumber[phoneNumberId] = item.parameterCount;
       templateMap[templateName].hasImageHeaderPerNumber[phoneNumberId] = hasImageHeader;
       templateMap[templateName].statusPerNumber[phoneNumberId] = item.status || "approved";
+      if (item.lastSyncedAt) {
+        templateMap[templateName].lastSyncedPerNumber[phoneNumberId] = item.lastSyncedAt;
+        const cur = templateMap[templateName].lastSyncedAt;
+        if (!cur || item.lastSyncedAt > cur) templateMap[templateName].lastSyncedAt = item.lastSyncedAt;
+      }
 
       // If any number has MARKETING, mark overall as MARKETING
       if (item.category === "MARKETING") {
