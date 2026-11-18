@@ -3,6 +3,7 @@ import { PutCommand, GetCommand, UpdateCommand, BatchWriteCommand } from "@aws-s
 import { docClient, TABLES } from "../../lib/dynamo";
 import { addCounters } from "../../lib/campaign-stats";
 import { CSVContact, PhoneNumber } from "../../lib/types";
+import { dedupeByPhone } from "../../lib/dedupe-contacts";
 import { createNotification } from "../notifications/index";
 import { getProvider } from "../../lib/providers";
 import { createRetryFailedCampaignIfNeeded } from "../../lib/retry-failed-campaign";
@@ -75,7 +76,7 @@ export const handler: SQSHandler = async (event) => {
     const shouldRespectUnsubscribeList = respectUnsubscribeList !== false;
     const shouldExcludePaidUsers = excludePaidUsers !== false;
 
-    const { contacts, phoneNumberId, wabaid, apiKey, source, endpoint } = batch as {
+    const { contacts: rawContacts, phoneNumberId, wabaid, apiKey, source, endpoint } = batch as {
       contacts: CSVContact[];
       phoneNumberId: string;
       displayName: string;
@@ -84,6 +85,17 @@ export const handler: SQSHandler = async (event) => {
       source?: string;
       endpoint?: string;
     };
+    // A phone listed twice in one batch makes every BatchWrite below (keyed
+    // MSG#<phone>) fail with "Provided list of item keys contains duplicates" —
+    // deterministically, so SQS retries it until it dead-letters, the batch
+    // never sends, completedBatches stops one short, and auto-stop.ts later
+    // force-closes the campaign (real incident: Navin "ALUMINI_Batch 3",
+    // 109/110 on all four runs). send.ts dedupes too; this also covers
+    // resume/retry batches and CSVs queued before that fix.
+    const contacts = dedupeByPhone(rawContacts);
+    if (contacts.length !== rawContacts.length) {
+      console.log(`Worker: dropped ${rawContacts.length - contacts.length} duplicate phone(s) in batch`);
+    }
 
     console.log(`Worker: ${contacts.length} contacts for ${phoneNumberId} in campaign ${campaignId}`);
 
@@ -94,7 +106,7 @@ export const handler: SQSHandler = async (event) => {
     const campCheck = await docClient.send(
       new GetCommand({ TableName: TABLES.CAMPAIGNS, Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" } })
     );
-    if (campCheck.Item?.status === "cancelled") {
+    if (campCheck.Item?.status === "cancelled" || campCheck.Item?.autoClosed === true) {
       console.log(`Skipping batch for cancelled campaign ${campaignId}`);
       const now = new Date().toISOString();
       const DYNAMO_BATCH = 25;

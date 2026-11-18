@@ -76,7 +76,7 @@ async function processJob(job: EmailJob) {
   const campResult = await docClient.send(
     new GetCommand({ TableName: TABLES.CAMPAIGNS, Key: { PK: `CAMP#${campaignId}`, SK: "METADATA" } })
   );
-  if (campResult.Item?.status === "cancelled") {
+  if (campResult.Item?.status === "cancelled" || campResult.Item?.autoClosed === true) {
     console.log(`[email-worker] campaign ${campaignId} cancelled — skipping ${contacts.length} emails`);
     return;
   }

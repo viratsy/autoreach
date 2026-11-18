@@ -96,6 +96,8 @@ export interface CampaignRecord {
   // can be computed without conflating the two.
   startedAt?: string;
   completedAt?: string;
+  // Set by auto-stop.ts when it force-closes a campaign still "running" after its day.
+  autoClosed?: boolean;
   // Set once, on the ORIGINAL campaign, the first time it spawns a Retry-Failed
   // follow-up — doubles as an idempotency guard so a campaign never spawns two.
   retryFailedCampaignId?: string;

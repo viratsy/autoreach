@@ -9,10 +9,10 @@ import { createNotification } from "../notifications/index";
  * to finish same-day; if one is still "running" after midnight, something went
  * wrong with the completion check in send-worker.ts (e.g. a missed final tick).
  * Whatever was sent/delivered/failed so far stands — this just stops the status
- * from lingering as "running" forever. Marked "cancelled" rather than
- * "completed" — send-worker.ts's per-batch skip-check for a stopped campaign
- * only matches "cancelled", and "completed" would misrepresent a campaign that
- * needed force-closing as having finished normally.
+ * from lingering as "running" forever. Marked "completed" (it did send — the
+ * team found "cancelled" misleading) with autoClosed=true, which
+ * send-worker.ts/email-worker.ts treat like "cancelled" so any batch still
+ * queued is skipped rather than sent the next day.
  */
 export const handler: Handler = async () => {
   const todayIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -38,13 +38,15 @@ export const handler: Handler = async () => {
           new UpdateCommand({
             TableName: TABLES.CAMPAIGNS,
             Key: { PK: campaign.PK, SK: "METADATA" },
-            UpdateExpression: "SET #status = :status, GSI2PK = :gsi2pk, updatedAt = :now, completedAt = :now",
+            UpdateExpression:
+              "SET #status = :status, GSI2PK = :gsi2pk, updatedAt = :now, completedAt = :now, autoClosed = :true",
             ConditionExpression: "#status = :expected",
             ExpressionAttributeNames: { "#status": "status" },
             ExpressionAttributeValues: {
-              ":status": "cancelled",
-              ":gsi2pk": "STATUS#cancelled",
+              ":status": "completed",
+              ":gsi2pk": "STATUS#completed",
               ":now": now,
+              ":true": true,
               ":expected": "running",
             },
           })

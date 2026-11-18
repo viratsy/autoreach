@@ -7,6 +7,7 @@ import { CSVContact, CampaignRecord, PhoneNumber as PhoneNumberRecord } from "..
 import { parseCSVWithHeaders } from "../../lib/csv";
 import { filterHealthyNumbers, distributeContactsWeighted } from "../../lib/round-robin";
 import { chunkForSQSBatch } from "../../lib/sqs-batching";
+import { dedupeByPhone } from "../../lib/dedupe-contacts";
 import { createNotification } from "../notifications/index";
 
 const s3 = new S3Client({});
@@ -130,8 +131,14 @@ export const handler: Handler = async (event) => {
     const activeNumbers = filterHealthyNumbers(withQuality);
 
     // Read CSV
-    const contacts = await fetchCSVFromS3(campaign.csvS3Key);
-    console.log(`Read ${contacts.length} contacts from CSV`);
+    // Deduped before distribution so a repeated phone is messaged once and can't
+    // land twice in one batch (see send-worker.ts — that crashes the batch).
+    const csvContacts = await fetchCSVFromS3(campaign.csvS3Key);
+    const contacts = dedupeByPhone(csvContacts);
+    console.log(
+      `Read ${csvContacts.length} contacts from CSV` +
+        (contacts.length !== csvContacts.length ? `, ${csvContacts.length - contacts.length} duplicate phone(s) dropped` : "")
+    );
 
     // Distribute across healthy numbers, weighted by cached 24h messaging tier
     // (falls back to a plain even split when no number has a cached tier yet).
